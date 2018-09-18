@@ -215,7 +215,7 @@ def sort_points(points, indices, sorting_method):
 # a b c
 # d e f
 # g h i
-# a(ei − fh) − b(di − fg) + c(dh − eg)
+# a(ei - fh) - b(di - fg) + c(dh - eg)
 def compute_determinant(A):
     return A[..., 0, 0] * (A[..., 1, 1] * A[..., 2, 2] - A[..., 1, 2] * A[..., 2, 1]) \
            - A[..., 0, 1] * (A[..., 1, 0] * A[..., 2, 2] - A[..., 1, 2] * A[..., 2, 0]) \

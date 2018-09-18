@@ -2,9 +2,14 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
+import sys
 import math
 import pointfly as pf
 import tensorflow as tf
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(BASE_DIR, '../tf_ops/sampling'))
+import tf_sampling
 
 
 def xconv(pts, fts, qrs, tag, N, K, D, P, C, C_pts_fts, is_training, with_X_transformation, depth_multiplier,
@@ -60,8 +65,8 @@ class PointCNN:
         sorting_method = setting.sorting_method
         N = tf.shape(points)[0]
 
-        if setting.sampling == 'fps':
-            from sampling import tf_sampling
+        #if setting.sampling == 'fps':
+        #    from sampling import tf_sampling
 
         self.layer_pts = [points]
         if features is None:

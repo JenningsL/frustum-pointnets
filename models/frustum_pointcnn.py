@@ -6,6 +6,7 @@ import sys
 import os
 import tensorflow as tf
 import numpy as np
+import importlib
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
@@ -16,8 +17,8 @@ from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER, NUM_OBJECT_POINT
 from model_util import point_cloud_masking, get_center_regression_net
 from model_util import placeholder_inputs, parse_output_to_tensors, get_loss
 pointcnn_setting_path = os.path.join(os.path.dirname(__file__), 'pointcnn')
+sys.path.append(pointcnn_setting_path)
 from pointcnn_seg import PointCNNSegNet
-sys.path.append(setting_path)
 
 def get_instance_seg_v2_net(point_cloud, one_hot_vec,
                             is_training, bn_decay, end_points):
@@ -36,7 +37,9 @@ def get_instance_seg_v2_net(point_cloud, one_hot_vec,
         end_points: dict
     '''
     setting = importlib.import_module('segmentation')
-    segNet = PointCNNSegNet(point_cloud, one_hot_vec, is_training, setting)
+    # (B, 3) -> (B, N, 3)
+    features = tf.tile(tf.expand_dims(one_hot_vec, 1), [1, point_cloud.get_shape()[1], 1])
+    segNet = PointCNNSegNet(point_cloud, features, is_training, setting)
     logits = segNet.logits
     # end_points['feats']?
     return logits, end_points
