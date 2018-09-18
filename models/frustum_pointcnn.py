@@ -37,9 +37,12 @@ def get_instance_seg_v2_net(point_cloud, one_hot_vec,
         end_points: dict
     '''
     setting = importlib.import_module('segmentation')
+    xyz = tf.slice(point_cloud, [0,0,0], [-1,-1,3])
+    features = tf.slice(point_cloud, [0,0,3], [-1,-1,1])
     # (B, 3) -> (B, N, 3)
-    features = tf.tile(tf.expand_dims(one_hot_vec, 1), [1, point_cloud.get_shape()[1], 1])
-    segNet = PointCNNSegNet(point_cloud, features, is_training, setting)
+    feat_one_hot = tf.tile(tf.expand_dims(one_hot_vec, 1), [1, point_cloud.get_shape()[1], 1])
+    features = tf.concat([features, feat_one_hot], 2)
+    segNet = PointCNNSegNet(xyz, features, is_training, setting)
     logits = segNet.logits
     # end_points['feats']?
     return logits, end_points
