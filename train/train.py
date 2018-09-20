@@ -82,7 +82,7 @@ def get_learning_rate(batch):
                         DECAY_RATE,          # Decay rate.
                         staircase=True)
     learing_rate = tf.maximum(learning_rate, 0.00001) # CLIP THE LEARNING RATE!
-    return learning_rate        
+    return learning_rate
 
 def get_bn_decay(batch):
     bn_momentum = tf.train.exponential_decay(
@@ -104,8 +104,8 @@ def train():
                 MODEL.placeholder_inputs(BATCH_SIZE, NUM_POINT)
 
             is_training_pl = tf.placeholder(tf.bool, shape=())
-            
-            # Note the global_step=batch parameter to minimize. 
+
+            # Note the global_step=batch parameter to minimize.
             # That tells the optimizer to increment the 'batch' parameter
             # for you every time it trains.
             batch = tf.get_variable('batch', [],
@@ -113,7 +113,7 @@ def train():
             bn_decay = get_bn_decay(batch)
             tf.summary.scalar('bn_decay', bn_decay)
 
-            # Get model and losses 
+            # Get model and losses
             end_points = MODEL.get_model(pointclouds_pl, one_hot_vec_pl,
                 is_training_pl, bn_decay=bn_decay)
             loss = MODEL.get_loss(labels_pl, centers_pl,
@@ -134,8 +134,8 @@ def train():
                 heading_class_label_pl, heading_residual_label_pl, \
                 size_class_label_pl, size_residual_label_pl], \
                 [tf.float32, tf.float32])
-            end_points['iou2ds'] = iou2ds 
-            end_points['iou3ds'] = iou3ds 
+            end_points['iou2ds'] = iou2ds
+            end_points['iou3ds'] = iou3ds
             tf.summary.scalar('iou_2d', tf.reduce_mean(iou2ds))
             tf.summary.scalar('iou_3d', tf.reduce_mean(iou3ds))
 
@@ -153,11 +153,15 @@ def train():
                     momentum=MOMENTUM)
             elif OPTIMIZER == 'adam':
                 optimizer = tf.train.AdamOptimizer(learning_rate)
-            train_op = optimizer.minimize(loss, global_step=batch)
-            
+
+            # Note: when training, the moving_mean and moving_variance need to be updated.
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            with tf.control_dependencies(update_ops):
+                train_op = optimizer.minimize(loss, global_step=batch)
+
             # Add ops to save and restore all the variables.
             saver = tf.train.Saver()
-        
+
         # Create a session
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -197,7 +201,7 @@ def train():
         for epoch in range(MAX_EPOCH):
             log_string('**** EPOCH %03d ****' % (epoch))
             sys.stdout.flush()
-             
+
             train_one_epoch(sess, ops, train_writer)
             eval_one_epoch(sess, ops, test_writer)
 
@@ -212,7 +216,7 @@ def train_one_epoch(sess, ops, train_writer):
     '''
     is_training = True
     log_string(str(datetime.now()))
-    
+
     # Shuffle train samples
     train_idxs = np.arange(0, len(TRAIN_DATASET))
     np.random.shuffle(train_idxs)
@@ -252,7 +256,7 @@ def train_one_epoch(sess, ops, train_writer):
         iou2ds, iou3ds = \
             sess.run([ops['merged'], ops['step'], ops['train_op'], ops['loss'],
                 ops['logits'], ops['centers_pred'],
-                ops['end_points']['iou2ds'], ops['end_points']['iou3ds']], 
+                ops['end_points']['iou2ds'], ops['end_points']['iou3ds']],
                 feed_dict=feed_dict)
 
         train_writer.add_summary(summary, step)
@@ -281,8 +285,8 @@ def train_one_epoch(sess, ops, train_writer):
             iou2ds_sum = 0
             iou3ds_sum = 0
             iou3d_correct_cnt = 0
-        
-        
+
+
 def eval_one_epoch(sess, ops, test_writer):
     ''' Simple evaluation for one epoch on the frustum dataset.
     ops is dict mapping from string to tf ops """
@@ -303,8 +307,8 @@ def eval_one_epoch(sess, ops, test_writer):
     iou2ds_sum = 0
     iou3ds_sum = 0
     iou3d_correct_cnt = 0
-   
-    # Simple evaluation with batches 
+
+    # Simple evaluation with batches
     for batch_idx in range(num_batches):
         start_idx = batch_idx * BATCH_SIZE
         end_idx = (batch_idx+1) * BATCH_SIZE
@@ -328,7 +332,7 @@ def eval_one_epoch(sess, ops, test_writer):
 
         summary, step, loss_val, logits_val, iou2ds, iou3ds = \
             sess.run([ops['merged'], ops['step'],
-                ops['loss'], ops['logits'], 
+                ops['loss'], ops['logits'],
                 ops['end_points']['iou2ds'], ops['end_points']['iou3ds']],
                 feed_dict=feed_dict)
         test_writer.add_summary(summary, step)
@@ -347,10 +351,10 @@ def eval_one_epoch(sess, ops, test_writer):
 
         for i in range(BATCH_SIZE):
             segp = preds_val[i,:]
-            segl = batch_label[i,:] 
+            segl = batch_label[i,:]
             part_ious = [0.0 for _ in range(NUM_CLASSES)]
             for l in range(NUM_CLASSES):
-                if (np.sum(segl==l) == 0) and (np.sum(segp==l) == 0): 
+                if (np.sum(segl==l) == 0) and (np.sum(segp==l) == 0):
                     part_ious[l] = 1.0 # class not present
                 else:
                     part_ious[l] = np.sum((segl==l) & (segp==l)) / \
@@ -367,7 +371,7 @@ def eval_one_epoch(sess, ops, test_writer):
             float(num_batches*BATCH_SIZE)))
     log_string('eval box estimation accuracy (IoU=0.7): %f' % \
         (float(iou3d_correct_cnt)/float(num_batches*BATCH_SIZE)))
-         
+
     EPOCH_CNT += 1
 
 
