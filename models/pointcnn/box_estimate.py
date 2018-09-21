@@ -5,6 +5,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE_DIR, '../'))
 from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER, NUM_OBJECT_POINT
 
+network_name = 'box_estimate'
+
 num_class = 2
 
 sample_num = 2048

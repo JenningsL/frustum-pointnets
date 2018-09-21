@@ -1,4 +1,7 @@
 import math
+
+network_name = 'segmentation'
+
 num_class = 2
 
 sample_num = 2048
@@ -33,7 +36,7 @@ scaling_range_val = [0, 0, 0, 'u']
 sample_num_variance = 1 // 8
 sample_num_clip = 1 // 4
 
-x = 8
+x = 4
 
 xconv_param_name = ('K', 'D', 'P', 'C', 'links')
 xconv_params = [dict(zip(xconv_param_name, xconv_param)) for xconv_param in
