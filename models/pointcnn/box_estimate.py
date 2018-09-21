@@ -45,10 +45,10 @@ x = 4
 
 xconv_param_name = ('K', 'D', 'P', 'C', 'links')
 xconv_params = [dict(zip(xconv_param_name, xconv_param)) for xconv_param in
-                [(12, 1, 128, 64, []),
-                 (16, 1, 64, 128, []),
-                 (16, 2, 32, 256, []),
-                 (16, 2, 32, 512, [])]]
+                [(12, 1, -1, 16 * x, []),
+                 (16, 1, 768, 32 * x, []),
+                 (16, 2, 384, 64 * x, []),
+                 (16, 2, 128, 96 * x, [])]]
 
 with_global = True
 
