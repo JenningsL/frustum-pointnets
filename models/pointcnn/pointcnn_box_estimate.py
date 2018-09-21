@@ -17,7 +17,7 @@ class PointCNNBoxNet(PointCNN):
         with tf.variable_scope(setting.network_name):
             batch_size = points.get_shape()[0].value
             fc_flatten = tf.reshape(self.fc_layers[-1], [batch_size, -1])
-            fc_flatten = tf.concat([fc_flatten, features], axis=1)
+            fc_flatten = tf.concat([fc_flatten, features[:, 0, :]], axis=1)
             fc1 = pf.dense(fc_flatten, 512, 'extra_fc_1', is_training)
             # fc1_drop = tf.layers.dropout(fc1, 0.0, training=is_training, name='extra_fc_1_drop')
             # self.fc_layers.append(fc1_drop)
