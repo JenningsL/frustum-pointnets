@@ -18,6 +18,7 @@ from model_util import point_cloud_masking, get_center_regression_net
 from model_util import placeholder_inputs, parse_output_to_tensors, get_loss
 pointcnn_setting_path = os.path.join(os.path.dirname(__file__), 'pointcnn')
 sys.path.append(pointcnn_setting_path)
+from pointcnn import PointCNN
 from pointcnn_seg import PointCNNSegNet
 
 def get_instance_seg_v2_net(point_cloud, one_hot_vec,
@@ -60,38 +61,11 @@ def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec,
             including box centers, heading bin class scores and residuals,
             and size cluster scores and residuals
     '''
-    # Gather object points
-    batch_size = object_point_cloud.get_shape()[0].value
-
-    l0_xyz = object_point_cloud
-    l0_points = None
-    # Set abstraction layers
-    l1_xyz, l1_points, l1_indices = pointnet_sa_module(l0_xyz, l0_points,
-        npoint=128, radius=0.2, nsample=64, mlp=[64,64,128],
-        mlp2=None, group_all=False,
-        is_training=is_training, bn_decay=bn_decay, scope='ssg-layer1')
-    l2_xyz, l2_points, l2_indices = pointnet_sa_module(l1_xyz, l1_points,
-        npoint=32, radius=0.4, nsample=64, mlp=[128,128,256],
-        mlp2=None, group_all=False,
-        is_training=is_training, bn_decay=bn_decay, scope='ssg-layer2')
-    l3_xyz, l3_points, l3_indices = pointnet_sa_module(l2_xyz, l2_points,
-        npoint=None, radius=None, nsample=None, mlp=[256,256,512],
-        mlp2=None, group_all=True,
-        is_training=is_training, bn_decay=bn_decay, scope='ssg-layer3')
-
-    # Fully connected layers
-    net = tf.reshape(l3_points, [batch_size, -1])
-    net = tf.concat([net, one_hot_vec], axis=1)
-    net = tf_util.fully_connected(net, 512, bn=True,
-        is_training=is_training, scope='fc1', bn_decay=bn_decay)
-    net = tf_util.fully_connected(net, 256, bn=True,
-        is_training=is_training, scope='fc2', bn_decay=bn_decay)
-
-    # The first 3 numbers: box center coordinates (cx,cy,cz),
-    # the next NUM_HEADING_BIN*2:  heading bin class scores and bin residuals
-    # next NUM_SIZE_CLUSTER*4: box cluster scores and residuals
-    output = tf_util.fully_connected(net,
-        3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4, activation_fn=None, scope='fc3')
+    setting = importlib.import_module('box_estimate')
+    features = tf.tile(tf.expand_dims(one_hot_vec, 1), [1, point_cloud.get_shape()[1], 1])
+    # NOTICE: frustum_pointnets_v2 concat one_hot_vec with feature in the first fc_layer
+    point_cnn = PointCNN(object_point_cloud, features, is_training, setting)
+    output = self.fc_layers[-1]
     return output, end_points
 
 
