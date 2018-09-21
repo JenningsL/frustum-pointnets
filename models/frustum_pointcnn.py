@@ -63,8 +63,7 @@ def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec,
             and size cluster scores and residuals
     '''
     setting = importlib.import_module('box_estimate')
-    features = tf.tile(tf.expand_dims(one_hot_vec, 1), [1, point_cloud.get_shape()[1], 1])
-    # NOTICE: frustum_pointnets_v2 concat one_hot_vec with feature in the first fc_layer
+    features = tf.tile(tf.expand_dims(one_hot_vec, 1), [1, object_point_cloud.get_shape()[1], 1])
     box_net = PointCNNBoxNet(object_point_cloud, features, is_training, setting)
     output = box_net.output
     return output, end_points
