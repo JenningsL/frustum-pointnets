@@ -20,6 +20,7 @@ pointcnn_setting_path = os.path.join(os.path.dirname(__file__), 'pointcnn')
 sys.path.append(pointcnn_setting_path)
 from pointcnn import PointCNN
 from pointcnn_seg import PointCNNSegNet
+from pointcnn_box_estimate import PointCNNBoxNet
 
 def get_instance_seg_v2_net(point_cloud, one_hot_vec,
                             is_training, bn_decay, end_points):
@@ -43,10 +44,10 @@ def get_instance_seg_v2_net(point_cloud, one_hot_vec,
     # (B, 3) -> (B, N, 3)
     feat_one_hot = tf.tile(tf.expand_dims(one_hot_vec, 1), [1, point_cloud.get_shape()[1], 1])
     features = tf.concat([features, feat_one_hot], 2)
-    segNet = PointCNNSegNet(xyz, features, is_training, setting)
-    logits = segNet.logits
+    seg_net = PointCNNSegNet(xyz, features, is_training, setting)
+    output = seg_net.output
     # end_points['feats']?
-    return logits, end_points
+    return output, end_points
 
 def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec,
                                  is_training, bn_decay, end_points):
@@ -64,8 +65,8 @@ def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec,
     setting = importlib.import_module('box_estimate')
     features = tf.tile(tf.expand_dims(one_hot_vec, 1), [1, point_cloud.get_shape()[1], 1])
     # NOTICE: frustum_pointnets_v2 concat one_hot_vec with feature in the first fc_layer
-    point_cnn = PointCNN(object_point_cloud, features, is_training, setting)
-    output = self.fc_layers[-1]
+    box_net = PointCNNBoxNet(object_point_cloud, features, is_training, setting)
+    output = box_net.output
     return output, end_points
 
 

@@ -9,5 +9,5 @@ from pointcnn import PointCNN
 class PointCNNSegNet(PointCNN):
     def __init__(self, points, features, is_training, setting):
         PointCNN.__init__(self, points, features, is_training, setting)
-        self.logits = pf.dense(self.fc_layers[-1], setting.num_class, 'logits',
+        self.output = pf.dense(self.fc_layers[-1], setting.num_class, 'output',
                                is_training, with_bn=False, activation=None)
