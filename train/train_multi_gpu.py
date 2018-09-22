@@ -187,11 +187,11 @@ def train():
                         centers_batch = tf.slice(centers_pl,
                             [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                         heading_class_label_batch = tf.slice(heading_class_label_pl,
-                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
+                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
                         heading_residual_label_batch = tf.slice(heading_residual_label_pl,
-                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
+                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
                         size_class_label_batch = tf.slice(size_class_label_pl,
-                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
+                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
                         size_residual_label_batch = tf.slice(size_residual_label_pl,
                             [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                         # get model and loss
