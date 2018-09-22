@@ -429,7 +429,7 @@ def eval_one_epoch(sess, ops, test_writer):
         summary, step, loss_val, logits_val, iou2ds, iou3ds = \
             sess.run([ops['merged'], ops['step'],
                 ops['loss'], ops['logits'],
-                ops['end_points']['iou2ds'], ops['end_points']['iou3ds']],
+                ops['iou2ds'], ops['iou3ds']],
                 feed_dict=feed_dict)
         test_writer.add_summary(summary, step)
 
