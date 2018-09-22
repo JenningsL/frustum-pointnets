@@ -183,17 +183,17 @@ def train():
                         one_hot_vec_batch = tf.slice(one_hot_vec_pl,
                             [i*DEVICE_BATCH_SIZE,0], [DEVICE_BATCH_SIZE,-1])
                         label_batch = tf.slice(labels_pl,
-                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
+                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                         centers_batch = tf.slice(centers_pl,
-                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
+                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                         heading_class_label_batch = tf.slice(heading_class_label_pl,
-                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
+                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                         heading_residual_label_batch = tf.slice(heading_residual_label_pl,
-                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
+                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                         size_class_label_batch = tf.slice(size_class_label_pl,
-                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
+                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                         size_residual_label_batch = tf.slice(size_residual_label_pl,
-                            [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
+                            [i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                         # get model and loss
                         end_points = MODEL.get_model(pc_batch, one_hot_vec_batch,
                             is_training_pl, bn_decay=bn_decay)
