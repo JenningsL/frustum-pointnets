@@ -46,9 +46,9 @@ x = 4
 xconv_param_name = ('K', 'D', 'P', 'C', 'links')
 xconv_params = [dict(zip(xconv_param_name, xconv_param)) for xconv_param in
                 [(12, 1, -1, 16 * x, []),
-                 (16, 1, 768, 32 * x, []),
-                 (16, 2, 384, 64 * x, []),
-                 (16, 2, 128, 96 * x, [])]]
+                 (16, 1, 192, 32 * x, []),
+                 (16, 2, 96, 64 * x, []),
+                 (16, 2, 32, 96 * x, [])]]
 
 with_global = True
 
@@ -70,7 +70,7 @@ sampling = 'fps'
 optimizer = 'adam'
 epsilon = 1e-3
 
-data_dim = 7
+data_dim = 6 # x, y, z, one-hot-3classees
 use_extra_features = True
 with_normal_feature = False
 with_X_transformation = True

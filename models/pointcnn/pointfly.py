@@ -161,6 +161,12 @@ def knn_indices(points, k, sort=True, unique=True):
 
 # return shape is (N, P, K, 2)
 def knn_indices_general(queries, points, k, sort=True, unique=True):
+    '''
+    Args:
+        queries: representative points
+        points: original points
+        k: num of nearest points
+    '''
     queries_shape = tf.shape(queries)
     batch_size = queries_shape[0]
     point_num = queries_shape[1]

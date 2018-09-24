@@ -63,7 +63,7 @@ sampling = 'fps'
 optimizer = 'adam'
 epsilon = 1e-3
 
-data_dim = 7
+data_dim = 7 # x, y, z, density, one-hot-3classees
 use_extra_features = True
 with_normal_feature = False
 with_X_transformation = True

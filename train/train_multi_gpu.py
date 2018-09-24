@@ -162,9 +162,9 @@ def train():
                 optimizer = tf.train.AdamOptimizer(learning_rate)
 
             # -------------------------------------------
-            # Get model and loss on multiple GPU devices
+            # Get common model on cpu
             # -------------------------------------------
-            end_points = MODEL.get_model(pointclouds_pl, one_hot_vec_pl,
+            MODEL.get_model(pointclouds_pl, one_hot_vec_pl,
                 is_training_pl, bn_decay=bn_decay)
 
             tower_grads = []
@@ -291,8 +291,9 @@ def train():
                'merged': merged,
                'step': batch,
                'iou2ds': total_iou2ds,
-               'iou3ds': total_iou3ds,
-               'end_points': end_points}
+               'iou3ds': total_iou3ds
+               #'end_points': end_points
+               }
 
         for epoch in range(MAX_EPOCH):
             log_string('**** EPOCH %03d ****' % (epoch))
