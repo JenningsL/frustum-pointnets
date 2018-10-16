@@ -165,7 +165,7 @@ def iou_2d(box1, box2):
     # compute the ratio of overlap
     return overlap / (area1 + area2 - overlap)
 
-def extract_frustum_data(idx_filename, split, output_filename, viz=False,
+def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                        perturb_box2d=False, augmentX=1, type_whitelist=['Car'],
                        kitti_path=os.path.join(ROOT_DIR,'dataset/KITTI/object')):
     ''' Extract point clouds and corresponding annotations in frustums
@@ -244,8 +244,8 @@ def extract_frustum_data(idx_filename, split, output_filename, viz=False,
                     [gt_corners_3d[3][0], gt_corners_3d[3][1]]
                 ]
                 iou_with_gt = iou_2d(prop_box_xy, gt_box_xy)
-                if iou_with_gt < 0.7:
-                    continue
+                # if iou_with_gt < 0.7:
+                #     continue
 
                 _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
                 pc_in_prop_box = pc_rect[prop_inds,:]
@@ -351,7 +351,7 @@ if __name__=='__main__':
 
     BASE_DIR = '/Users/jennings/Desktop/frustum-pointnets/avod_prop'
     if args.gen_train:
-        extract_frustum_data(\
+        extract_proposal_data(\
             os.path.join(BASE_DIR, 'image_sets/train.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'train.pickle'),
@@ -360,7 +360,7 @@ if __name__=='__main__':
             kitti_path='/Users/jennings/Desktop/kitti/object')
 
     if args.gen_val:
-        extract_frustum_data(\
+        extract_proposal_data(\
             os.path.join(BASE_DIR, 'image_sets/val.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'val.pickle'),
