@@ -19,7 +19,6 @@ import kitti_util as utils
 import cPickle as pickle
 from kitti_object_avod import *
 import argparse
-print(BASE_DIR)
 
 def in_hull(p, hull):
     from scipy.spatial import Delaunay
@@ -165,7 +164,7 @@ def iou_2d(box1, box2):
     # compute the ratio of overlap
     return overlap / (area1 + area2 - overlap)
 
-def extract_frustum_data(idx_filename, split, output_filename, viz=False,
+def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                        perturb_box2d=False, augmentX=1, type_whitelist=['Car'],
                        kitti_path=os.path.join(ROOT_DIR,'dataset/KITTI/object')):
     ''' Extract point clouds and corresponding annotations in frustums
@@ -207,7 +206,11 @@ def extract_frustum_data(idx_filename, split, output_filename, viz=False,
         # ground truth
         objects = dataset.get_label_objects(data_idx)
         # proposal boxes
-        proposals = dataset.get_proposals(data_idx)
+        try:
+            proposals = dataset.get_proposals(data_idx)
+        except:
+            print('proposal not found for: ', data_idx)
+            continue
         pc_velo = dataset.get_lidar(data_idx)
         pc_rect = np.zeros_like(pc_velo)
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
@@ -244,8 +247,8 @@ def extract_frustum_data(idx_filename, split, output_filename, viz=False,
                     [gt_corners_3d[3][0], gt_corners_3d[3][1]]
                 ]
                 iou_with_gt = iou_2d(prop_box_xy, gt_box_xy)
-                if iou_with_gt < 0.7:
-                    continue
+                # if iou_with_gt < 0.7:
+                #     continue
 
                 _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
                 pc_in_prop_box = pc_rect[prop_inds,:]
@@ -336,6 +339,7 @@ if __name__=='__main__':
     parser.add_argument('--gen_val', action='store_true', help='Generate val split frustum data with GT 2D boxes')
     parser.add_argument('--gen_val_rgb_detection', action='store_true', help='Generate val split frustum data with RGB detection 2D boxes')
     parser.add_argument('--car_only', action='store_true', help='Only generate cars; otherwise cars, peds and cycs')
+    parser.add_argument('--kitti_path', action='store_true', help='Path to Kitti Object Data')
     args = parser.parse_args()
 
     if args.demo:
@@ -349,20 +353,22 @@ if __name__=='__main__':
         type_whitelist = ['Car', 'Pedestrian', 'Cyclist']
         output_prefix = 'frustum_carpedcyc_'
 
-    BASE_DIR = '/Users/jennings/Desktop/frustum-pointnets/avod_prop'
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    print(BASE_DIR)
     if args.gen_train:
-        extract_frustum_data(\
+        extract_proposal_data(\
             os.path.join(BASE_DIR, 'image_sets/train.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'train.pickle'),
             viz=False, perturb_box2d=True, augmentX=5,
             type_whitelist=type_whitelist,
-            kitti_path='/Users/jennings/Desktop/kitti/object')
+            kitti_path=args.kitti_path)
 
     if args.gen_val:
-        extract_frustum_data(\
+        extract_proposal_data(\
             os.path.join(BASE_DIR, 'image_sets/val.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'val.pickle'),
             viz=False, perturb_box2d=False, augmentX=1,
-            type_whitelist=type_whitelist)
+            type_whitelist=type_whitelist,
+            kitti_path=args.kitti_path)
