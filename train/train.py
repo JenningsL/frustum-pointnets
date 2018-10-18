@@ -101,7 +101,7 @@ def train():
     best_best_val_loss = float('inf')
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
-            pointclouds_pl, one_hot_vec_pl, labels_pl, centers_pl, \
+            pointclouds_pl, features_pl, cls_one_hot_pl, labels_pl, centers_pl, \
             heading_class_label_pl, heading_residual_label_pl, \
             size_class_label_pl, size_residual_label_pl = \
                 MODEL.placeholder_inputs(BATCH_SIZE, NUM_POINT)
@@ -117,9 +117,9 @@ def train():
             tf.summary.scalar('bn_decay', bn_decay)
 
             # Get model and losses
-            end_points = MODEL.get_model(pointclouds_pl, one_hot_vec_pl,
+            end_points = MODEL.get_model(pointclouds_pl, features_pl,
                 is_training_pl, bn_decay=bn_decay)
-            loss = MODEL.get_loss(labels_pl, centers_pl,
+            loss = MODEL.get_loss(cls_one_hot_pl, labels_pl, centers_pl,
                 heading_class_label_pl, heading_residual_label_pl,
                 size_class_label_pl, size_residual_label_pl, end_points)
             tf.summary.scalar('loss', loss)
