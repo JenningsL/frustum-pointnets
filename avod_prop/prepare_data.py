@@ -14,7 +14,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
-from viz_util import draw_lidar, draw_gt_boxes3d
+# from viz_util import draw_lidar, draw_gt_boxes3d
 sys.path.append(os.path.join(BASE_DIR, '../kitti'))
 import kitti_util as utils
 import cPickle as pickle
@@ -208,7 +208,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
     Output:
         None (will write a .pickle file to the disk)
     '''
-    import mayavi.mlab as mlab
+    # import mayavi.mlab as mlab
     dataset = kitti_object_avod(kitti_path, split)
     data_idx_list = [int(line.rstrip()) for line in open(idx_filename)]
 
@@ -404,7 +404,7 @@ if __name__=='__main__':
     print(BASE_DIR)
     if args.gen_train:
         extract_proposal_data(\
-            os.path.join(BASE_DIR, 'image_sets/train.small.txt'),
+            os.path.join(BASE_DIR, 'image_sets/train.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'train.pickle'),
             viz=False, perturb_box2d=True, augmentX=5,
