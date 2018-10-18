@@ -175,7 +175,7 @@ def placeholder_inputs(batch_size, num_point):
     pointclouds_pl = tf.placeholder(tf.float32,
         shape=(batch_size, num_point, 4))
     features_pl = tf.placeholder(tf.float32, shape=(batch_size, 9))
-    cls_label_pl = tf.placeholder(tf.float32, shape=(batch_size,))
+    cls_label_pl = tf.placeholder(tf.int32, shape=(batch_size,))
 
     # labels_pl is for segmentation label
     seg_labels_pl = tf.placeholder(tf.int32, shape=(batch_size, num_point))
