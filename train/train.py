@@ -373,7 +373,7 @@ def eval_one_epoch(sess, ops, test_writer):
             float(num_batches*BATCH_SIZE)))
     log_string('eval box estimation accuracy (IoU=0.7): %f' % \
         (float(iou3d_correct_cnt)/float(num_batches*BATCH_SIZE)))
-    box_estimation_acc = float(iou3d_correct_cnt)/float(num_batches*BATCH_SIZE))
+    box_estimation_acc = float(iou3d_correct_cnt)/float(num_batches*BATCH_SIZE)
     mean_loss = loss_sum / float(num_batches)
     EPOCH_CNT += 1
     return mean_loss

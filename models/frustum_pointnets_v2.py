@@ -53,11 +53,11 @@ def get_instance_seg_v2_net(point_cloud, feature_vec,
     batch_size = tf.shape(feature_vec)[0]
     cls_net = tf.reshape(l3_points, [batch_size, -1])
     cls_net = tf.concat([cls_net, feature_vec], axis=1)
-    cls_net = tf_util.fully_connected(net, 512, bn=True, is_training=is_training, scope='cls_fc1', bn_decay=bn_decay)
-    cls_net = tf_util.dropout(net, keep_prob=0.4, is_training=is_training, scope='cls_dp1')
-    cls_net = tf_util.fully_connected(net, 256, bn=True, is_training=is_training, scope='cls_fc2', bn_decay=bn_decay)
-    cls_net = tf_util.dropout(net, keep_prob=0.4, is_training=is_training, scope='cls_dp2')
-    cls_net = tf_util.fully_connected(net, 4, activation_fn=None, scope='cls_fc3')
+    cls_net = tf_util.fully_connected(cls_net, 512, bn=True, is_training=is_training, scope='cls_fc1', bn_decay=bn_decay)
+    cls_net = tf_util.dropout(cls_net, keep_prob=0.4, is_training=is_training, scope='cls_dp1')
+    cls_net = tf_util.fully_connected(cls_net, 256, bn=True, is_training=is_training, scope='cls_fc2', bn_decay=bn_decay)
+    cls_net = tf_util.dropout(cls_net, keep_prob=0.4, is_training=is_training, scope='cls_dp2')
+    cls_net = tf_util.fully_connected(cls_net, 4, activation_fn=None, scope='cls_fc3')
     end_points['cls_logits'] = cls_net
 
     # Feature Propagation layers

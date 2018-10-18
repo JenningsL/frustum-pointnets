@@ -99,7 +99,7 @@ class FrustumDataset(object):
     '''
     def __init__(self, npoints, split,
                  random_flip=False, random_shift=False, rotate_to_center=False,
-                 overwritten_data_path=None, from_rgb_detection=False, feature_map=False):
+                 overwritten_data_path=None, from_rgb_detection=False, extra_feature=False):
         '''
         Input:
             npoints: int scalar, number of points for frustum point cloud.
