@@ -14,11 +14,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
+from viz_util import draw_lidar, draw_gt_boxes3d
 sys.path.append(os.path.join(BASE_DIR, '../kitti'))
 import kitti_util as utils
 import cPickle as pickle
 from kitti_object_avod import *
 import argparse
+from shapely.geometry import Polygon, MultiPolygon
 
 def in_hull(p, hull):
     from scipy.spatial import Delaunay
@@ -164,6 +166,28 @@ def iou_2d(box1, box2):
     # compute the ratio of overlap
     return overlap / (area1 + area2 - overlap)
 
+def find_match_label(prop_corners, labels_corners):
+    '''
+    Find label with largest IOU. Label boxes can be rotated in xy plane
+    '''
+    # labels = MultiPolygon(labels_corners)
+    labels = map(lambda corners: Polygon(corners), labels_corners)
+    target = Polygon(prop_corners)
+    largest_iou = 0.0
+    largest_idx = -1
+    for i, label in enumerate(labels):
+        area1 = label.area
+        area2 = target.area
+        intersection = target.intersection(label).area
+        iou = intersection / (area1 + area2 - intersection)
+        # print(area1, area2, intersection)
+        print(iou)
+        if iou > largest_iou:
+            largest_iou = iou
+            largest_idx = i
+    print('largest_idx:', largest_idx)
+    return largest_idx
+
 def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                        perturb_box2d=False, augmentX=1, type_whitelist=['Car'],
                        kitti_path=os.path.join(ROOT_DIR,'dataset/KITTI/object')):
@@ -184,6 +208,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
     Output:
         None (will write a .pickle file to the disk)
     '''
+    import mayavi.mlab as mlab
     dataset = kitti_object_avod(kitti_path, split)
     data_idx_list = [int(line.rstrip()) for line in open(idx_filename)]
 
@@ -197,6 +222,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
     # (cont.) clockwise angle from positive x axis in velo coord.
     box3d_size_list = [] # array of l,w,h
     frustum_angle_list = [] # angle of 2d box center from pos x-axis
+    type_count = {key: 0 for key in type_whitelist}
 
     pos_cnt = 0
     all_cnt = 0
@@ -215,73 +241,92 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
         pc_rect = np.zeros_like(pc_velo)
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
         pc_rect[:,3] = pc_velo[:,3]
-        # img = dataset.get_image(data_idx)
-        # img_height, img_width, img_channel = img.shape
-        # _, pc_image_coord, img_fov_inds = get_lidar_in_image_fov(pc_velo[:,0:3],
-        #     calib, 0, 0, img_width, img_height, True)
 
-        for obj_idx in range(len(objects)):
-            if objects[obj_idx].type not in type_whitelist :continue
-            box2d = objects[obj_idx].box2d
-            xmin,ymin,xmax,ymax = box2d
-            # Get frustum angle (according to center pixel in 2D BOX)
-            box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
-            uvdepth = np.zeros((1,3))
-            uvdepth[0,0:2] = box2d_center
-            uvdepth[0,2] = 20 # some random depth
-            box2d_center_rect = calib.project_image_to_rect(uvdepth)
-            frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
-                box2d_center_rect[0,0])
-            # 3D BOX: Get pts velo in 3d box
-            obj = objects[obj_idx]
-            box3d_pts_2d, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
-            # TODO: for now, only ouput the proposal with enough IOU
-            for prop in proposals:
-                _, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
-                prop_box_xy = [
-                    [prop_corners_3d[1][0], prop_corners_3d[1][1]],
-                    [prop_corners_3d[3][0], prop_corners_3d[3][1]]
-                ]
-                gt_box_xy = [
-                    [gt_corners_3d[1][0], gt_corners_3d[1][1]],
-                    [gt_corners_3d[3][0], gt_corners_3d[3][1]]
-                ]
-                iou_with_gt = iou_2d(prop_box_xy, gt_box_xy)
-                # if iou_with_gt < 0.7:
-                #     continue
+        # TODO: use avod feature map output
+        gt_boxes_xy = []
+        gt_boxes_3d = []
+        objects = filter(lambda obj: obj.type in type_whitelist, objects)
+        for obj in objects:
+            _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
+            gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
+            gt_boxes_3d.append(gt_corners_3d)
 
-                _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
-                pc_in_prop_box = pc_rect[prop_inds,:]
+        for prop in proposals:
+            prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+            if prop_corners_image_2d is None:
+                print('skip proposal behind camera')
+                continue
+            prop_box_xy = prop_corners_3d[:4, [0,2]]
+            # get points within proposal box
+            _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+            pc_in_prop_box = pc_rect[prop_inds,:]
+            # segmentation label
+            label = np.zeros((pc_in_prop_box.shape[0]))
+            # find corresponding label object
+            obj_idx = find_match_label(prop_box_xy, gt_boxes_xy)
+            if obj_idx == -1:
+                # non-object
+                obj_type = 'NonObject'
+                gt_box_3d = np.zeros((8, 3))
+                heading_angle = 0
+                box3d_size = np.zeros((1, 3))
+                frustum_angle = 0
+            else:
+                obj = objects[obj_idx]
+                obj_type = obj.type
+                gt_box_3d = gt_boxes_3d[obj_idx]
 
-                _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_corners_3d)
-                label = np.zeros((pc_in_prop_box.shape[0]))
+                _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
                 label[inds] = 1
                 # Get 3D BOX heading
                 heading_angle = obj.ry
                 # Get 3D BOX size
                 box3d_size = np.array([obj.l, obj.w, obj.h])
+                # Get frustum angle
+                xmin, ymin = prop_corners_image_2d.min(0)
+                xmax, ymax = prop_corners_image_2d.max(0)
+                box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
+                uvdepth = np.zeros((1,3))
+                uvdepth[0,0:2] = box2d_center
+                uvdepth[0,2] = 20 # some random depth
+                box2d_center_rect = calib.project_image_to_rect(uvdepth)
+                frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
+                    box2d_center_rect[0,0])
 
-                # Reject object without points
-                if np.sum(label)==0:
-                    continue
+                # visualize
+                # if obj_type == 'NonObject':
+                #     print('NonObject')
+                #     continue
+                # fig = draw_lidar(pc_rect)
+                # # fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
+                # fig = draw_gt_boxes3d([prop_corners_3d], fig, draw_text=False, color=(1, 0, 0))
+                # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
+                # raw_input()
 
-                id_list.append(data_idx)
-                # box2d_list.append(np.array([xmin,ymin,xmax,ymax]))
-                box3d_list.append(gt_corners_3d)
-                input_list.append(pc_in_prop_box)
-                label_list.append(label)
-                type_list.append(objects[obj_idx].type)
-                heading_list.append(heading_angle)
-                box3d_size_list.append(box3d_size)
-                frustum_angle_list.append(frustum_angle)
+            # Reject object without points
+            # if np.sum(label)==0:
+            #     continue
 
-                # collect statistics
-                pos_cnt += np.sum(label)
-                all_cnt += pc_in_prop_box.shape[0]
+
+            id_list.append(data_idx)
+            # box2d_list.append(np.array([xmin,ymin,xmax,ymax]))
+            box3d_list.append(gt_box_3d)
+            input_list.append(pc_in_prop_box)
+            label_list.append(label)
+            type_list.append(obj_type)
+            heading_list.append(heading_angle)
+            box3d_size_list.append(box3d_size)
+            frustum_angle_list.append(frustum_angle)
+
+            # collect statistics
+            pos_cnt += np.sum(label)
+            all_cnt += pc_in_prop_box.shape[0]
+            type_count[obj_type] += 1
 
     print('Average pos ratio: %f' % (pos_cnt/float(all_cnt)))
     print('Average npoints: %f' % (float(all_cnt)/len(id_list)))
     print('Sample numbers: %d' % len(input_list))
+    print('Type count:', type_count)
 
     with open(output_filename,'wb') as fp:
         pickle.dump(id_list, fp)
@@ -296,7 +341,9 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
 
     if viz:
         import mayavi.mlab as mlab
-        for i in range(10):
+        for i in range(len(id_list)):
+            if type_list[i] == 'NonObject':
+                continue
             p1 = input_list[i]
             seg = label_list[i]
             fig = mlab.figure(figure=None, bgcolor=(0.4,0.4,0.4),
@@ -339,7 +386,7 @@ if __name__=='__main__':
     parser.add_argument('--gen_val', action='store_true', help='Generate val split frustum data with GT 2D boxes')
     parser.add_argument('--gen_val_rgb_detection', action='store_true', help='Generate val split frustum data with RGB detection 2D boxes')
     parser.add_argument('--car_only', action='store_true', help='Only generate cars; otherwise cars, peds and cycs')
-    parser.add_argument('--kitti_path', action='store_true', help='Path to Kitti Object Data')
+    parser.add_argument('--kitti_path', help='Path to Kitti Object Data')
     args = parser.parse_args()
 
     if args.demo:
@@ -347,17 +394,17 @@ if __name__=='__main__':
         exit()
 
     if args.car_only:
-        type_whitelist = ['Car']
+        type_whitelist = ['Car', 'NonObject']
         output_prefix = 'frustum_caronly_'
     else:
-        type_whitelist = ['Car', 'Pedestrian', 'Cyclist']
+        type_whitelist = ['Car', 'Pedestrian', 'Cyclist', 'NonObject']
         output_prefix = 'frustum_carpedcyc_'
 
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     print(BASE_DIR)
     if args.gen_train:
         extract_proposal_data(\
-            os.path.join(BASE_DIR, 'image_sets/train.txt'),
+            os.path.join(BASE_DIR, 'image_sets/train.small.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'train.pickle'),
             viz=False, perturb_box2d=True, augmentX=5,
