@@ -181,10 +181,10 @@ def get_model(point_cloud, feature_vec, is_training, bn_decay=None):
 if __name__=='__main__':
     with tf.Graph().as_default():
         inputs = tf.zeros((32,1024,4))
-        outputs = get_model(inputs, tf.ones((32,3)), tf.constant(True))
+        outputs = get_model(inputs, tf.ones((32,9)), tf.constant(True))
         for key in outputs:
             print((key, outputs[key]))
-        loss = get_loss(tf.zeros((32,4),dtype=tf.int32),
+        loss = get_loss(tf.zeros((32,),dtype=tf.int32),
             tf.zeros((32,1024),dtype=tf.int32),
             tf.zeros((32,3)), tf.zeros((32,),dtype=tf.int32),
             tf.zeros((32,)), tf.zeros((32,),dtype=tf.int32),
