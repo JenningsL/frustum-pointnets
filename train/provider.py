@@ -70,11 +70,11 @@ def class2angle(pred_cls, residual, num_class, to_label_format=True):
     if to_label_format and angle>np.pi:
         angle = angle - 2*np.pi
     return angle
-        
+
 def size2class(size, type_name):
     ''' Convert 3D bounding box size to template class and residuals.
     todo (rqi): support multiple size clusters per type.
- 
+
     Input:
         size: numpy array of shape (3,) for (l,w,h)
         type_name: string
@@ -99,7 +99,7 @@ class FrustumDataset(object):
     '''
     def __init__(self, npoints, split,
                  random_flip=False, random_shift=False, rotate_to_center=False,
-                 overwritten_data_path=None, from_rgb_detection=False, one_hot=False):
+                 overwritten_data_path=None, from_rgb_detection=False, feature_map=False):
         '''
         Input:
             npoints: int scalar, number of points for frustum point cloud.
@@ -113,13 +113,13 @@ class FrustumDataset(object):
                 if None, use default path (with the split)
             from_rgb_detection: bool, if True we assume we do not have
                 groundtruth, just return data elements.
-            one_hot: bool, if True, return one hot vector
+            extra_feature: bool, if True, return region feature vector
         '''
         self.npoints = npoints
         self.random_flip = random_flip
         self.random_shift = random_shift
         self.rotate_to_center = rotate_to_center
-        self.one_hot = one_hot
+        self.extra_feature = extra_feature
         if overwritten_data_path is None:
             overwritten_data_path = os.path.join(ROOT_DIR,
                 'kitti/frustum_carpedcyc_%s.pickle'%(split))
@@ -132,7 +132,7 @@ class FrustumDataset(object):
                 self.input_list = pickle.load(fp)
                 self.type_list = pickle.load(fp)
                 # frustum_angle is clockwise angle from positive x-axis
-                self.frustum_angle_list = pickle.load(fp) 
+                self.frustum_angle_list = pickle.load(fp)
                 self.prob_list = pickle.load(fp)
         else:
             with open(overwritten_data_path,'rb') as fp:
@@ -145,7 +145,7 @@ class FrustumDataset(object):
                 self.heading_list = pickle.load(fp)
                 self.size_list = pickle.load(fp)
                 # frustum_angle is clockwise angle from positive x-axis
-                self.frustum_angle_list = pickle.load(fp) 
+                self.frustum_angle_list = pickle.load(fp)
 
     def __len__(self):
             return len(self.input_list)
@@ -155,12 +155,9 @@ class FrustumDataset(object):
         # ------------------------------ INPUTS ----------------------------
         rot_angle = self.get_center_view_rot_angle(index)
 
-        # Compute one hot vector
-        if self.one_hot:
-            cls_type = self.type_list[index]
-            assert(cls_type in ['Car', 'Pedestrian', 'Cyclist'])
-            one_hot_vec = np.zeros((3))
-            one_hot_vec[g_type2onehotclass[cls_type]] = 1
+        if self.extra_feature:
+            # TODO
+            feature_vec = np.zeros((9))
 
         # Get point cloud
         if self.rotate_to_center:
@@ -176,9 +173,15 @@ class FrustumDataset(object):
                 return point_set, rot_angle, self.prob_list[index], one_hot_vec
             else:
                 return point_set, rot_angle, self.prob_list[index]
-        
+
         # ------------------------------ LABELS ----------------------------
-        seg = self.label_list[index] 
+        # classification
+        cls_type = self.type_list[index]
+        assert(cls_type in ['Car', 'Pedestrian', 'Cyclist', 'NonObject'])
+        one_hot_vec = np.zeros((4))
+        one_hot_vec[g_type2onehotclass[cls_type]] = 1
+
+        seg = self.label_list[index]
         seg = seg[choice]
 
         # Get center point of 3D box
@@ -214,12 +217,12 @@ class FrustumDataset(object):
         angle_class, angle_residual = angle2class(heading_angle,
             NUM_HEADING_BIN)
 
-        if self.one_hot:
+        if self.extra_feature:
             return point_set, seg, box3d_center, angle_class, angle_residual,\
-                size_class, size_residual, rot_angle, one_hot_vec
+                size_class, size_residual, rot_angle, one_hot_vec, feature_vec
         else:
             return point_set, seg, box3d_center, angle_class, angle_residual,\
-                size_class, size_residual, rot_angle
+                size_class, size_residual, rot_angle, one_hot_vec
 
     def get_center_view_rot_angle(self, index):
         ''' Get the frustum rotation angle, it isshifted by pi/2 so that it
@@ -238,7 +241,7 @@ class FrustumDataset(object):
             self.box3d_list[index][6,:])/2.0
         return rotate_pc_along_y(np.expand_dims(box3d_center,0), \
             self.get_center_view_rot_angle(index)).squeeze()
-        
+
     def get_center_view_box3d(self, index):
         ''' Frustum rotation of 3D bounding box corners. '''
         box3d = self.box3d_list[index]
@@ -322,8 +325,8 @@ def compute_box3d_iou(center_pred,
     size_residual = np.vstack([size_residuals[i,size_class[i],:] \
         for i in range(batch_size)])
 
-    iou2d_list = [] 
-    iou3d_list = [] 
+    iou2d_list = []
+    iou3d_list = []
     for i in range(batch_size):
         heading_angle = class2angle(heading_class[i],
             heading_residual[i], NUM_HEADING_BIN)
@@ -336,7 +339,7 @@ def compute_box3d_iou(center_pred,
         corners_3d_label = get_3d_box(box_size_label,
             heading_angle_label, center_label[i])
 
-        iou_3d, iou_2d = box3d_iou(corners_3d, corners_3d_label) 
+        iou_3d, iou_2d = box3d_iou(corners_3d, corners_3d_label)
         iou3d_list.append(iou_3d)
         iou2d_list.append(iou_2d)
     return np.array(iou2d_list, dtype=np.float32), \
@@ -353,7 +356,7 @@ def from_prediction_to_label_format(center, angle_class, angle_res,\
     return h,w,l,tx,ty,tz,ry
 
 if __name__=='__main__':
-    import mayavi.mlab as mlab 
+    import mayavi.mlab as mlab
     sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
     from viz_util import draw_lidar, draw_gt_boxes3d
     median_list = []

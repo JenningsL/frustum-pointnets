@@ -16,7 +16,7 @@ NUM_OBJECT_POINT = 512
 g_type2class={'Car':0, 'Van':1, 'Truck':2, 'Pedestrian':3,
               'Person_sitting':4, 'Cyclist':5, 'Tram':6, 'Misc':7}
 g_class2type = {g_type2class[t]:t for t in g_type2class}
-g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
+g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2, 'NonObject': 3}
 g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
                     'Van': np.array([5.06763659,1.9007158,2.20532825]),
                     'Truck': np.array([10.13586957,2.58549199,3.2520595]),
@@ -48,7 +48,7 @@ def tf_gather_object_pc(point_cloud, mask, npoints=512):
         for i in range(mask.shape[0]):
             pos_indices = np.where(mask[i,:]>0.5)[0]
             # skip cases when pos_indices is empty
-            if len(pos_indices) > 0: 
+            if len(pos_indices) > 0:
                 if len(pos_indices) > npoints:
                     choice = np.random.choice(len(pos_indices),
                         npoints, replace=False)
@@ -61,7 +61,7 @@ def tf_gather_object_pc(point_cloud, mask, npoints=512):
             indices[i,:,0] = i
         return indices
 
-    indices = tf.py_func(mask_to_indices, [mask], tf.int32)  
+    indices = tf.py_func(mask_to_indices, [mask], tf.int32)
     object_pc = tf.gather_nd(point_cloud, indices)
     return object_pc, indices
 
@@ -105,7 +105,7 @@ def get_box3d_corners(center, heading_residuals, size_residuals):
     batch_size = center.get_shape()[0].value
     heading_bin_centers = tf.constant(np.arange(0,2*np.pi,2*np.pi/NUM_HEADING_BIN), dtype=tf.float32) # (NH,)
     headings = heading_residuals + tf.expand_dims(heading_bin_centers, 0) # (B,NH)
-    
+
     mean_sizes = tf.expand_dims(tf.constant(g_mean_size_arr, dtype=tf.float32), 0) + size_residuals # (B,NS,1)
     sizes = mean_sizes + size_residuals # (B,NS,3)
     sizes = tf.tile(tf.expand_dims(sizes,1), [1,NUM_HEADING_BIN,1,1]) # (B,NH,NS,3)
@@ -146,7 +146,7 @@ def parse_output_to_tensors(output, end_points):
         heading_residuals_normalized # BxNUM_HEADING_BIN (-1 to 1)
     end_points['heading_residuals'] = \
         heading_residuals_normalized * (np.pi/NUM_HEADING_BIN) # BxNUM_HEADING_BIN
-    
+
     size_scores = tf.slice(output, [0,3+NUM_HEADING_BIN*2],
         [-1,NUM_SIZE_CLUSTER]) # BxNUM_SIZE_CLUSTER
     size_residuals_normalized = tf.slice(output,
@@ -192,7 +192,7 @@ def placeholder_inputs(batch_size, num_point):
 def point_cloud_masking(point_cloud, logits, end_points, xyz_only=True):
     ''' Select point cloud with predicted 3D mask,
     translate coordinates to the masked points centroid.
-    
+
     Input:
         point_cloud: TF tensor in shape (B,N,C)
         logits: TF tensor in shape (B,N,2)
@@ -247,7 +247,7 @@ def get_center_regression_net(object_point_cloud, one_hot_vec,
             length-3 vectors indicating predicted object type
     Output:
         predicted_center: TF tensor in shape (B,3)
-    ''' 
+    '''
     num_point = object_point_cloud.get_shape()[1].value
     net = tf.expand_dims(object_point_cloud, 2)
     net = tf_util.conv2d(net, 128, [1,1],
@@ -275,7 +275,7 @@ def get_center_regression_net(object_point_cloud, one_hot_vec,
     return predicted_center, end_points
 
 
-def get_loss(mask_label, center_label, \
+def get_loss(cls_label, mask_label, center_label, \
              heading_class_label, heading_residual_label, \
              size_class_label, size_residual_label, \
              end_points, \
@@ -283,10 +283,11 @@ def get_loss(mask_label, center_label, \
              box_loss_weight=1.0):
     ''' Loss functions for 3D object detection.
     Input:
+        cls_label: TF int32 tensor in shape (B,NUM_OBJ_CLASSES)
         mask_label: TF int32 tensor in shape (B,N)
         center_label: TF tensor in shape (B,3)
-        heading_class_label: TF int32 tensor in shape (B,) 
-        heading_residual_label: TF tensor in shape (B,) 
+        heading_class_label: TF int32 tensor in shape (B,)
+        heading_residual_label: TF tensor in shape (B,)
         size_class_label: TF tensor int32 in shape (B,)
         size_residual_label: TF tensor tensor in shape (B,)
         end_points: dict, outputs from our model
@@ -296,41 +297,57 @@ def get_loss(mask_label, center_label, \
         total_loss: TF scalar tensor
             the total_loss is also added to the losses collection
     '''
+    # classification loss
+    cls_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(\
+        logits=end_points['cls_logits'], labels=cls_label))
+    tf.summary.scalar('classification loss', cls_loss)
+    is_obj_mask = tf.not_equal(tf.argmax(cls_label, axis=1), 3)
     # 3D Segmentation loss
+    mask_logits = tf.boolean_mask(end_points['mask_logits'], is_obj_mask)
+    mask_label = tf.boolean_mask(mask_label, is_obj_mask)
     mask_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(\
-        logits=end_points['mask_logits'], labels=mask_label))
+        logits=mask_logits, labels=mask_label))
     tf.summary.scalar('3d mask loss', mask_loss)
 
     # Center regression losses
-    center_dist = tf.norm(center_label - end_points['center'], axis=-1)
+    center_label = tf.boolean_mask(center_label, is_obj_mask)
+    center_pred = tf.boolean_mask(end_points['center'], is_obj_mask)
+    center_dist = tf.norm(center_label - center_pred, axis=-1)
     center_loss = huber_loss(center_dist, delta=2.0)
     tf.summary.scalar('center loss', center_loss)
+    stage1_center = tf.boolean_mask(end_points['stage1_center'], is_obj_mask)
     stage1_center_dist = tf.norm(center_label - \
-        end_points['stage1_center'], axis=-1)
+        stage1_center, axis=-1)
     stage1_center_loss = huber_loss(stage1_center_dist, delta=1.0)
     tf.summary.scalar('stage1 center loss', stage1_center_loss)
 
     # Heading loss
+    heading_scores = tf.boolean_mask(end_points['heading_scores'], is_obj_mask)
+    heading_class_label = tf.boolean_mask(heading_class_label, is_obj_mask)
     heading_class_loss = tf.reduce_mean( \
         tf.nn.sparse_softmax_cross_entropy_with_logits( \
-        logits=end_points['heading_scores'], labels=heading_class_label))
+        logits=heading_scores, labels=heading_class_label))
     tf.summary.scalar('heading class loss', heading_class_loss)
 
     hcls_onehot = tf.one_hot(heading_class_label,
         depth=NUM_HEADING_BIN,
         on_value=1, off_value=0, axis=-1) # BxNUM_HEADING_BIN
+    heading_residual_label = tf.boolean_mask(heading_residual_label, is_obj_mask)
     heading_residual_normalized_label = \
         heading_residual_label / (np.pi/NUM_HEADING_BIN)
+    heading_residuals_normalized = tf.boolean_mask(end_points['heading_residuals_normalized'], is_obj_mask)
     heading_residual_normalized_loss = huber_loss(tf.reduce_sum( \
-        end_points['heading_residuals_normalized']*tf.to_float(hcls_onehot), axis=1) - \
+        heading_residuals_normalized*tf.to_float(hcls_onehot), axis=1) - \
         heading_residual_normalized_label, delta=1.0)
     tf.summary.scalar('heading residual normalized loss',
         heading_residual_normalized_loss)
 
     # Size loss
+    size_scores = tf.boolean_mask(end_points['size_scores'], is_obj_mask)
+    size_class_label = tf.boolean_mask(size_class_label, is_obj_mask)
     size_class_loss = tf.reduce_mean( \
         tf.nn.sparse_softmax_cross_entropy_with_logits( \
-        logits=end_points['size_scores'], labels=size_class_label))
+        logits=size_scores, labels=size_class_label))
     tf.summary.scalar('size class loss', size_class_loss)
 
     scls_onehot = tf.one_hot(size_class_label,
@@ -338,13 +355,15 @@ def get_loss(mask_label, center_label, \
         on_value=1, off_value=0, axis=-1) # BxNUM_SIZE_CLUSTER
     scls_onehot_tiled = tf.tile(tf.expand_dims( \
         tf.to_float(scls_onehot), -1), [1,1,3]) # BxNUM_SIZE_CLUSTERx3
+    size_residuals_normalized = tf.boolean_mask(end_points['size_residuals_normalized'], is_obj_mask)
     predicted_size_residual_normalized = tf.reduce_sum( \
-        end_points['size_residuals_normalized']*scls_onehot_tiled, axis=[1]) # Bx3
+        size_residuals_normalized*scls_onehot_tiled, axis=[1]) # Bx3
 
     mean_size_arr_expand = tf.expand_dims( \
         tf.constant(g_mean_size_arr, dtype=tf.float32),0) # 1xNUM_SIZE_CLUSTERx3
     mean_size_label = tf.reduce_sum( \
         scls_onehot_tiled * mean_size_arr_expand, axis=[1]) # Bx3
+    size_residual_label = tf.boolean_mask(size_residual_label, is_obj_mask)
     size_residual_label_normalized = size_residual_label / mean_size_label
     size_normalized_dist = tf.norm( \
         size_residual_label_normalized - predicted_size_residual_normalized,
@@ -354,11 +373,12 @@ def get_loss(mask_label, center_label, \
         size_residual_normalized_loss)
 
     # Corner loss
-    # We select the predicted corners corresponding to the 
+    # We select the predicted corners corresponding to the
     # GT heading bin and size cluster.
     corners_3d = get_box3d_corners(end_points['center'],
         end_points['heading_residuals'],
         end_points['size_residuals']) # (B,NH,NS,8,3)
+    corners_3d = tf.boolean_mask(corners_3d, is_obj_mask)
     gt_mask = tf.tile(tf.expand_dims(hcls_onehot, 2), [1,1,NUM_SIZE_CLUSTER]) * \
         tf.tile(tf.expand_dims(scls_onehot,1), [1,NUM_HEADING_BIN,1]) # (B,NH,NS)
     corners_3d_pred = tf.reduce_sum( \
@@ -378,16 +398,18 @@ def get_loss(mask_label, center_label, \
         tf.expand_dims(tf.to_float(scls_onehot),-1)*size_label, axis=[1]) # (B,3)
     corners_3d_gt = get_box3d_corners_helper( \
         center_label, heading_label, size_label) # (B,8,3)
+    corners_3d_gt = tf.boolean_mask(corners_3d_gt, is_obj_mask)
     corners_3d_gt_flip = get_box3d_corners_helper( \
         center_label, heading_label+np.pi, size_label) # (B,8,3)
+    corners_3d_gt_flip = tf.boolean_mask(corners_3d_gt_flip, is_obj_mask)
 
     corners_dist = tf.minimum(tf.norm(corners_3d_pred - corners_3d_gt, axis=-1),
         tf.norm(corners_3d_pred - corners_3d_gt_flip, axis=-1))
-    corners_loss = huber_loss(corners_dist, delta=1.0) 
+    corners_loss = huber_loss(corners_dist, delta=1.0)
     tf.summary.scalar('corners loss', corners_loss)
 
     # Weighted sum of all losses
-    total_loss = mask_loss + box_loss_weight * (center_loss + \
+    total_loss = cls_loss*20 + mask_loss + box_loss_weight * (center_loss + \
         heading_class_loss + size_class_loss + \
         heading_residual_normalized_loss*20 + \
         size_residual_normalized_loss*20 + \

@@ -65,9 +65,9 @@ BN_DECAY_CLIP = 0.99
 
 # Load Frustum Datasets. Use default data paths.
 TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
-    rotate_to_center=True, random_flip=True, random_shift=True, one_hot=True)
+    rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=False)
 TEST_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='val',
-    rotate_to_center=True, one_hot=True)
+    rotate_to_center=True, extra_feature=False)
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -96,6 +96,7 @@ def get_bn_decay(batch):
 
 def train():
     ''' Main function for training and simple evaluation. '''
+    best_best_val_loss = float('inf')
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
             pointclouds_pl, one_hot_vec_pl, labels_pl, centers_pl, \
@@ -203,12 +204,13 @@ def train():
             sys.stdout.flush()
 
             train_one_epoch(sess, ops, train_writer)
-            eval_one_epoch(sess, ops, test_writer)
+            val_loss = eval_one_epoch(sess, ops, test_writer)
 
             # Save the variables to disk.
-            if epoch % 10 == 0:
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
                 save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
-                log_string("Model saved in file: %s" % save_path)
+                log_string("Model saved in file: {0}, val_loss: {1}".format(save_path, val_loss))
 
 def train_one_epoch(sess, ops, train_writer):
     ''' Training for one epoch on the frustum dataset.
@@ -371,8 +373,10 @@ def eval_one_epoch(sess, ops, test_writer):
             float(num_batches*BATCH_SIZE)))
     log_string('eval box estimation accuracy (IoU=0.7): %f' % \
         (float(iou3d_correct_cnt)/float(num_batches*BATCH_SIZE)))
-
+    box_estimation_acc = float(iou3d_correct_cnt)/float(num_batches*BATCH_SIZE))
+    mean_loss = loss_sum / float(num_batches)
     EPOCH_CNT += 1
+    return mean_loss
 
 
 if __name__ == "__main__":
