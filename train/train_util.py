@@ -29,6 +29,7 @@ def get_batch(dataset, idxs, start_idx, end_idx,
 
     bsize = end_idx-start_idx
     batch_data = np.zeros((bsize, num_point, num_channel))
+    batch_cls_label = np.zeros((bsize,), dtype=np.int32)
     batch_label = np.zeros((bsize, num_point), dtype=np.int32)
     batch_center = np.zeros((bsize, 3))
     batch_heading_class = np.zeros((bsize,), dtype=np.int32)
@@ -36,17 +37,18 @@ def get_batch(dataset, idxs, start_idx, end_idx,
     batch_size_class = np.zeros((bsize,), dtype=np.int32)
     batch_size_residual = np.zeros((bsize, 3))
     batch_rot_angle = np.zeros((bsize,))
-    if dataset.one_hot:
-        batch_one_hot_vec = np.zeros((bsize,3)) # for car,ped,cyc
+    if dataset.extra_feature:
+        batch_feature_vec = np.zeros((bsize,9)) # for car,ped,cyc
     for i in range(bsize):
-        if dataset.one_hot:
-            ps,seg,center,hclass,hres,sclass,sres,rotangle,onehotvec = \
+        if dataset.extra_feature:
+            ps,seg,center,hclass,hres,sclass,sres,rotangle,cls_label,feature_vec = \
                 dataset[idxs[i+start_idx]]
-            batch_one_hot_vec[i] = onehotvec
+            batch_feature_vec[i] = feature_vec
         else:
-            ps,seg,center,hclass,hres,sclass,sres,rotangle = \
+            ps,seg,center,hclass,hres,sclass,sres,rotangle,cls_label = \
                 dataset[idxs[i+start_idx]]
         batch_data[i,...] = ps[:,0:num_channel]
+        batch_cls_label[i] = cls_label
         batch_label[i,:] = seg
         batch_center[i,:] = center
         batch_heading_class[i] = hclass
@@ -55,12 +57,12 @@ def get_batch(dataset, idxs, start_idx, end_idx,
         batch_size_residual[i] = sres
         batch_rot_angle[i] = rotangle
     if dataset.one_hot:
-        return batch_data, batch_label, batch_center, \
+        return batch_data, batch_cls_label, batch_label, batch_center, \
             batch_heading_class, batch_heading_residual, \
             batch_size_class, batch_size_residual, \
-            batch_rot_angle, batch_one_hot_vec
+            batch_rot_angle, batch_feature_vec
     else:
-        return batch_data, batch_label, batch_center, \
+        return batch_data, batch_cls_label, batch_label, batch_center, \
             batch_heading_class, batch_heading_residual, \
             batch_size_class, batch_size_residual, batch_rot_angle
 
@@ -85,5 +87,3 @@ def get_batch_from_rgb_detection(dataset, idxs, start_idx, end_idx,
         return batch_data, batch_rot_angle, batch_prob, batch_one_hot_vec
     else:
         return batch_data, batch_rot_angle, batch_prob
-
-
