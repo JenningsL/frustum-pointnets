@@ -178,8 +178,7 @@ class FrustumDataset(object):
         # classification
         cls_type = self.type_list[index]
         assert(cls_type in ['Car', 'Pedestrian', 'Cyclist', 'NonObject'])
-        one_hot_vec = np.zeros((4))
-        one_hot_vec[g_type2onehotclass[cls_type]] = 1
+        cls_label = g_type2onehotclass[cls_type]
 
         seg = self.label_list[index]
         seg = seg[choice]
@@ -219,10 +218,10 @@ class FrustumDataset(object):
 
         if self.extra_feature:
             return point_set, seg, box3d_center, angle_class, angle_residual,\
-                size_class, size_residual, rot_angle, one_hot_vec, feature_vec
+                size_class, size_residual, rot_angle, cls_label, feature_vec
         else:
             return point_set, seg, box3d_center, angle_class, angle_residual,\
-                size_class, size_residual, rot_angle, one_hot_vec
+                size_class, size_residual, rot_angle, cls_label
 
     def get_center_view_rot_angle(self, index):
         ''' Get the frustum rotation angle, it isshifted by pi/2 so that it
