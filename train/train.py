@@ -66,10 +66,10 @@ BN_DECAY_CLIP = 0.99
 
 # Load Frustum Datasets. Use default data paths.
 TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
-    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train.pickle',
+    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train_sm.pickle',
     rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=True)
 TEST_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='val',
-    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val.pickle',
+    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val_sm.pickle',
     rotate_to_center=True, extra_feature=True)
 
 def log_string(out_str):
@@ -196,6 +196,7 @@ def train():
                'size_residual_label_pl': size_residual_label_pl,
                'is_training_pl': is_training_pl,
                'logits': end_points['mask_logits'],
+               'cls_logits': end_points['cls_logits'],
                'centers_pred': end_points['center'],
                'loss': loss,
                'train_op': train_op,
@@ -272,7 +273,7 @@ def train_one_epoch(sess, ops, train_writer):
         train_writer.add_summary(summary, step)
 
         # classification acc
-        cls_preds_val = np.argmax(logits_val, 1)
+        cls_preds_val = np.argmax(cls_logits_val, 1)
         cls_correct = np.sum(cls_preds_val == batch_cls_label)
         total_cls_correct += cls_correct
         total_cls_seen += BATCH_SIZE
@@ -368,12 +369,11 @@ def eval_one_epoch(sess, ops, test_writer):
         test_writer.add_summary(summary, step)
 
         # classification acc
-        cls_preds_val = np.argmax(logits_val, 1)
+        cls_preds_val = np.argmax(cls_logits_val, 1)
         cls_correct = np.sum(cls_preds_val == batch_cls_label)
         total_cls_correct += cls_correct
         total_cls_seen += BATCH_SIZE
-        # 4 classes to classify
-        for l in range(4):
+        for l in range(NUM_OBJ_CLASSES):
             total_seen_class[l] += np.sum(batch_cls_label==l)
             total_correct_class[l] += (np.sum((cls_preds_val==l) & (batch_cls_label==l)))
 
