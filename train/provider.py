@@ -164,6 +164,9 @@ class FrustumDataset(object):
             point_set = self.get_center_view_point_set(index)
         else:
             point_set = self.input_list[index]
+        # empty point set
+        if point_set.shape[0] == 0:
+            point_set = np.array([[0.0, 0.0, 0.0, 0.0]])
         # Resample
         choice = np.random.choice(point_set.shape[0], self.npoints, replace=True)
         point_set = point_set[choice, :]
@@ -181,6 +184,8 @@ class FrustumDataset(object):
         cls_label = g_type2onehotclass[cls_type]
 
         seg = self.label_list[index]
+        if seg.shape[0] == 0:
+            seg = np.array([0])
         seg = seg[choice]
 
         # Get center point of 3D box

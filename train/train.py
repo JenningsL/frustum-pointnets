@@ -66,10 +66,10 @@ BN_DECAY_CLIP = 0.99
 # Load Frustum Datasets. Use default data paths.
 TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
     overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train.pickle',
-    rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=False)
+    rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=True)
 TEST_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='val',
     overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val.pickle',
-    rotate_to_center=True, extra_feature=False)
+    rotate_to_center=True, extra_feature=True)
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -98,7 +98,7 @@ def get_bn_decay(batch):
 
 def train():
     ''' Main function for training and simple evaluation. '''
-    best_best_val_loss = float('inf')
+    best_val_loss = float('inf')
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
             pointclouds_pl, features_pl, cls_labels_pl, labels_pl, centers_pl, \
@@ -186,7 +186,7 @@ def train():
 
         ops = {'pointclouds_pl': pointclouds_pl,
                'features_pl': features_pl,
-               'cls_label_pl': cls_label_pl,
+               'cls_label_pl': cls_labels_pl,
                'labels_pl': labels_pl,
                'centers_pl': centers_pl,
                'heading_class_label_pl': heading_class_label_pl,

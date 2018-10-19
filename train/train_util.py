@@ -56,7 +56,7 @@ def get_batch(dataset, idxs, start_idx, end_idx,
         batch_size_class[i] = sclass
         batch_size_residual[i] = sres
         batch_rot_angle[i] = rotangle
-    if dataset.one_hot:
+    if dataset.extra_feature:
         return batch_data, batch_cls_label, batch_label, batch_center, \
             batch_heading_class, batch_heading_residual, \
             batch_size_class, batch_size_residual, \
