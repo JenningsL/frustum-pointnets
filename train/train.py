@@ -66,10 +66,10 @@ BN_DECAY_CLIP = 0.99
 
 # Load Frustum Datasets. Use default data paths.
 TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
-    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train_sm.pickle',
+    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train.pickle',
     rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=True)
 TEST_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='val',
-    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val_sm.pickle',
+    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val.pickle',
     rotate_to_center=True, extra_feature=True)
 
 def log_string(out_str):
