@@ -47,7 +47,8 @@ OPTIMIZER = FLAGS.optimizer
 DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
 NUM_CHANNEL = 3 if FLAGS.no_intensity else 4 # point feature channel
-NUM_CLASSES = 2 # segmentation has two classes
+NUM_SEG_CLASSES = 2 # segmentation has two classes
+NUM_OBJ_CLASSES = 4 # classification has 4 classes
 
 MODEL = importlib.import_module(FLAGS.model) # import network module
 MODEL_FILE = os.path.join(ROOT_DIR, 'models', FLAGS.model+'.py')
@@ -228,9 +229,12 @@ def train_one_epoch(sess, ops, train_writer):
     num_batches = len(TRAIN_DATASET)/BATCH_SIZE
 
     # To collect statistics
+    total_cls_correct = 0
+    total_cls_seen = 0
     total_correct = 0
     total_seen = 0
     loss_sum = 0
+    total_obj_sample = 0
     iou2ds_sum = 0
     iou3ds_sum = 0
     iou3d_correct_cnt = 0
@@ -258,35 +262,51 @@ def train_one_epoch(sess, ops, train_writer):
                      ops['size_residual_label_pl']: batch_sres,
                      ops['is_training_pl']: is_training,}
 
-        summary, step, _, loss_val, logits_val, centers_pred_val, \
+        summary, step, _, loss_val, cls_logits_val, logits_val, centers_pred_val, \
         iou2ds, iou3ds = \
             sess.run([ops['merged'], ops['step'], ops['train_op'], ops['loss'],
-                ops['logits'], ops['centers_pred'],
+                ops['cls_logits'], ops['logits'], ops['centers_pred'],
                 ops['end_points']['iou2ds'], ops['end_points']['iou3ds']],
                 feed_dict=feed_dict)
 
         train_writer.add_summary(summary, step)
 
+        # classification acc
+        cls_preds_val = np.argmax(logits_val, 1)
+        cls_correct = np.sum(cls_preds_val == batch_cls_label)
+        total_cls_correct += cls_correct
+        total_cls_seen += BATCH_SIZE
+        # only calculate seg acc and regression performance with object labels
+        obj_mask = batch_cls_label < 3
+        obj_sample_num = len(obj_mask)
+        total_obj_sample += obj_sample_num
+        # segmentation acc
         preds_val = np.argmax(logits_val, 2)
-        correct = np.sum(preds_val == batch_label)
+        correct = np.sum(preds_val[obj_mask] == batch_label[obj_mask])
         total_correct += correct
-        total_seen += (BATCH_SIZE*NUM_POINT)
+        total_seen += (obj_sample_num*NUM_POINT)
         loss_sum += loss_val
-        iou2ds_sum += np.sum(iou2ds)
-        iou3ds_sum += np.sum(iou3ds)
-        iou3d_correct_cnt += np.sum(iou3ds>=0.7)
+        iou2ds_sum += np.sum(iou2ds[obj_mask])
+        iou3ds_sum += np.sum(iou3ds[obj_mask])
+        iou3d_correct_cnt += np.sum(iou3ds[obj_mask]>=0.7)
 
         if (batch_idx+1)%10 == 0:
             log_string(' -- %03d / %03d --' % (batch_idx+1, num_batches))
             log_string('mean loss: %f' % (loss_sum / 10))
-            log_string('segmentation accuracy: %f' % \
-                (total_correct / float(total_seen)))
+            log_string('classification accuracy: %f' % \
+                (total_cls_correct / float(total_cls_seen)))
+            if total_seen > 0:
+                log_string('segmentation accuracy: %f' % \
+                    (total_correct / float(total_seen)))
             log_string('box IoU (ground/3D): %f / %f' % \
-                (iou2ds_sum / float(BATCH_SIZE*10), iou3ds_sum / float(BATCH_SIZE*10)))
+                (iou2ds_sum / float(total_obj_sample), iou3ds_sum / float(total_obj_sample)))
             log_string('box estimation accuracy (IoU=0.7): %f' % \
-                (float(iou3d_correct_cnt)/float(BATCH_SIZE*10)))
+                (float(iou3d_correct_cnt)/float(total_obj_sample)))
+            total_cls_correct = 0
             total_correct = 0
+            total_cls_seen = 0
             total_seen = 0
+            total_obj_sample = 0
             loss_sum = 0
             iou2ds_sum = 0
             iou3ds_sum = 0
@@ -305,11 +325,14 @@ def eval_one_epoch(sess, ops, test_writer):
     num_batches = len(TEST_DATASET)/BATCH_SIZE
 
     # To collect statistics
+    total_cls_correct = 0
+    total_cls_seen = 0
+    total_seen_class = [0 for _ in range(NUM_OBJ_CLASSES)]
+    total_correct_class = [0 for _ in range(NUM_OBJ_CLASSES)]
     total_correct = 0
     total_seen = 0
     loss_sum = 0
-    total_seen_class = [0 for _ in range(NUM_CLASSES)]
-    total_correct_class = [0 for _ in range(NUM_CLASSES)]
+    total_obj_sample = 0
     iou2ds_sum = 0
     iou3ds_sum = 0
     iou3d_correct_cnt = 0
@@ -337,48 +360,62 @@ def eval_one_epoch(sess, ops, test_writer):
                      ops['size_residual_label_pl']: batch_sres,
                      ops['is_training_pl']: is_training}
 
-        summary, step, loss_val, logits_val, iou2ds, iou3ds = \
+        summary, step, loss_val, cls_logits_val, logits_val, iou2ds, iou3ds = \
             sess.run([ops['merged'], ops['step'],
-                ops['loss'], ops['logits'],
+                ops['loss'], ops['cls_logits'], ops['logits'],
                 ops['end_points']['iou2ds'], ops['end_points']['iou3ds']],
                 feed_dict=feed_dict)
         test_writer.add_summary(summary, step)
 
-        preds_val = np.argmax(logits_val, 2)
-        correct = np.sum(preds_val == batch_label)
-        total_correct += correct
-        total_seen += (BATCH_SIZE*NUM_POINT)
-        loss_sum += loss_val
-        for l in range(NUM_CLASSES):
-            total_seen_class[l] += np.sum(batch_label==l)
-            total_correct_class[l] += (np.sum((preds_val==l) & (batch_label==l)))
-        iou2ds_sum += np.sum(iou2ds)
-        iou3ds_sum += np.sum(iou3ds)
-        iou3d_correct_cnt += np.sum(iou3ds>=0.7)
+        # classification acc
+        cls_preds_val = np.argmax(logits_val, 1)
+        cls_correct = np.sum(cls_preds_val == batch_cls_label)
+        total_cls_correct += cls_correct
+        total_cls_seen += BATCH_SIZE
+        # 4 classes to classify
+        for l in range(4):
+            total_seen_class[l] += np.sum(batch_cls_label==l)
+            total_correct_class[l] += (np.sum((cls_preds_val==l) & (batch_cls_label==l)))
 
-        for i in range(BATCH_SIZE):
-            segp = preds_val[i,:]
-            segl = batch_label[i,:]
-            part_ious = [0.0 for _ in range(NUM_CLASSES)]
-            for l in range(NUM_CLASSES):
-                if (np.sum(segl==l) == 0) and (np.sum(segp==l) == 0):
-                    part_ious[l] = 1.0 # class not present
-                else:
-                    part_ious[l] = np.sum((segl==l) & (segp==l)) / \
-                        float(np.sum((segl==l) | (segp==l)))
+        # only calculate seg acc and regression performance with object labels
+        obj_mask = batch_cls_label < 3
+        obj_sample_num = len(obj_mask)
+        total_obj_sample += obj_sample_num
+        # segmentation acc
+        preds_val = np.argmax(logits_val, 2)
+        correct = np.sum(preds_val[obj_mask] == batch_label[obj_mask])
+        total_correct += correct
+        total_seen += (obj_sample_num*NUM_POINT)
+        loss_sum += loss_val
+        iou2ds_sum += np.sum(iou2ds[obj_mask])
+        iou3ds_sum += np.sum(iou3ds[obj_mask])
+        iou3d_correct_cnt += np.sum(iou3ds[obj_mask]>=0.7)
+
+        # for i in range(BATCH_SIZE):
+        #     segp = preds_val[i,:]
+        #     segl = batch_label[i,:]
+        #     part_ious = [0.0 for _ in range(NUM_SEG_CLASSES)]
+        #     for l in range(NUM_SEG_CLASSES):
+        #         if (np.sum(segl==l) == 0) and (np.sum(segp==l) == 0):
+        #             part_ious[l] = 1.0 # class not present
+        #         else:
+        #             part_ious[l] = np.sum((segl==l) & (segp==l)) / \
+        #                 float(np.sum((segl==l) | (segp==l)))
 
     log_string('eval mean loss: %f' % (loss_sum / float(num_batches)))
+    log_string('classification accuracy: %f' % \
+        (total_cls_correct / float(total_cls_seen)))
     log_string('eval segmentation accuracy: %f'% \
         (total_correct / float(total_seen)))
-    log_string('eval segmentation avg class acc: %f' % \
+    log_string('eval classification avg class acc: %f' % \
         (np.mean(np.array(total_correct_class) / \
             np.array(total_seen_class,dtype=np.float))))
     log_string('eval box IoU (ground/3D): %f / %f' % \
-        (iou2ds_sum / float(num_batches*BATCH_SIZE), iou3ds_sum / \
-            float(num_batches*BATCH_SIZE)))
+        (iou2ds_sum / float(total_obj_sample), iou3ds_sum / \
+            float(total_obj_sample)))
     log_string('eval box estimation accuracy (IoU=0.7): %f' % \
-        (float(iou3d_correct_cnt)/float(num_batches*BATCH_SIZE)))
-    box_estimation_acc = float(iou3d_correct_cnt)/float(num_batches*BATCH_SIZE)
+        (float(iou3d_correct_cnt)/float(total_obj_sample)))
+    box_estimation_acc = float(iou3d_correct_cnt)/float(total_obj_sample)
     mean_loss = loss_sum / float(num_batches)
     EPOCH_CNT += 1
     return mean_loss
