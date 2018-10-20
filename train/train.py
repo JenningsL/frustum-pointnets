@@ -196,6 +196,7 @@ def train():
                'size_residual_label_pl': size_residual_label_pl,
                'is_training_pl': is_training_pl,
                'logits': end_points['mask_logits'],
+               'cls_logits': end_points['cls_logits'],
                'centers_pred': end_points['center'],
                'loss': loss,
                'train_op': train_op,
@@ -272,7 +273,7 @@ def train_one_epoch(sess, ops, train_writer):
         train_writer.add_summary(summary, step)
 
         # classification acc
-        cls_preds_val = np.argmax(logits_val, 1)
+        cls_preds_val = np.argmax(cls_logits_val, 1)
         cls_correct = np.sum(cls_preds_val == batch_cls_label)
         total_cls_correct += cls_correct
         total_cls_seen += BATCH_SIZE
@@ -368,12 +369,11 @@ def eval_one_epoch(sess, ops, test_writer):
         test_writer.add_summary(summary, step)
 
         # classification acc
-        cls_preds_val = np.argmax(logits_val, 1)
+        cls_preds_val = np.argmax(cls_logits_val, 1)
         cls_correct = np.sum(cls_preds_val == batch_cls_label)
         total_cls_correct += cls_correct
         total_cls_seen += BATCH_SIZE
-        # 4 classes to classify
-        for l in range(4):
+        for l in range(NUM_OBJ_CLASSES):
             total_seen_class[l] += np.sum(batch_cls_label==l)
             total_correct_class[l] += (np.sum((cls_preds_val==l) & (batch_cls_label==l)))
 
