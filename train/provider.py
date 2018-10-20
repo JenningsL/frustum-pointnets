@@ -146,6 +146,7 @@ class FrustumDataset(object):
                 self.size_list = pickle.load(fp)
                 # frustum_angle is clockwise angle from positive x-axis
                 self.frustum_angle_list = pickle.load(fp)
+                self.roi_features = pickle.load(fp)
 
     def __len__(self):
             return len(self.input_list)
@@ -156,8 +157,7 @@ class FrustumDataset(object):
         rot_angle = self.get_center_view_rot_angle(index)
 
         if self.extra_feature:
-            # TODO
-            feature_vec = np.zeros((9))
+            feature_vec = self.roi_features
 
         # Get point cloud
         if self.rotate_to_center:

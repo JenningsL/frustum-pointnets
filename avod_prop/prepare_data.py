@@ -222,6 +222,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
     # (cont.) clockwise angle from positive x axis in velo coord.
     box3d_size_list = [] # array of l,w,h
     frustum_angle_list = [] # angle of 2d box center from pos x-axis
+    roi_feature_list = [] # feature map crop for proposal region
     type_count = {key: 0 for key in type_whitelist}
 
     pos_cnt = 0
@@ -317,6 +318,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
             heading_list.append(heading_angle)
             box3d_size_list.append(box3d_size)
             frustum_angle_list.append(frustum_angle)
+            roi_feature_list.append(prop.roi_features)
 
             # collect statistics
             pos_cnt += np.sum(label)
@@ -338,6 +340,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
         pickle.dump(heading_list, fp)
         pickle.dump(box3d_size_list, fp)
         pickle.dump(frustum_angle_list, fp)
+        pickle.dump(roi_feature_list, fp)
 
     if viz:
         import mayavi.mlab as mlab
