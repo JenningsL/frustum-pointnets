@@ -157,7 +157,7 @@ class FrustumDataset(object):
         rot_angle = self.get_center_view_rot_angle(index)
 
         if self.extra_feature:
-            feature_vec = self.roi_features
+            feature_vec = self.roi_features[index]
 
         # Get point cloud
         if self.rotate_to_center:

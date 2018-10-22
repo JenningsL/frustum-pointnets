@@ -38,7 +38,7 @@ def get_batch(dataset, idxs, start_idx, end_idx,
     batch_size_residual = np.zeros((bsize, 3))
     batch_rot_angle = np.zeros((bsize,))
     if dataset.extra_feature:
-        batch_feature_vec = np.zeros((bsize,9)) # for car,ped,cyc
+        batch_feature_vec = np.zeros((bsize, len(dataset[0][-1])))
     for i in range(bsize):
         if dataset.extra_feature:
             ps,seg,center,hclass,hres,sclass,sres,rotangle,cls_label,feature_vec = \

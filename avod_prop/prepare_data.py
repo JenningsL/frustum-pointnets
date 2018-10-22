@@ -235,7 +235,8 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
         # proposal boxes
         try:
             proposals = dataset.get_proposals(data_idx)
-        except:
+        except Exception, e:
+            print(e)
             print('proposal not found for: ', data_idx)
             continue
         pc_velo = dataset.get_lidar(data_idx)
