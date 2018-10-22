@@ -9,12 +9,12 @@ import os
 import sys
 import numpy as np
 import cv2
+import random
 from PIL import Image
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
-# from viz_util import draw_lidar, draw_gt_boxes3d
 sys.path.append(os.path.join(BASE_DIR, '../kitti'))
 import kitti_util as utils
 import cPickle as pickle
@@ -166,14 +166,14 @@ def iou_2d(box1, box2):
     # compute the ratio of overlap
     return overlap / (area1 + area2 - overlap)
 
-def find_match_label(prop_corners, labels_corners):
+def find_match_label(prop_corners, labels_corners, iou_threshold=0.5):
     '''
     Find label with largest IOU. Label boxes can be rotated in xy plane
     '''
     # labels = MultiPolygon(labels_corners)
     labels = map(lambda corners: Polygon(corners), labels_corners)
     target = Polygon(prop_corners)
-    largest_iou = 0.0
+    largest_iou = iou_threshold
     largest_idx = -1
     for i, label in enumerate(labels):
         area1 = label.area
@@ -181,16 +181,51 @@ def find_match_label(prop_corners, labels_corners):
         intersection = target.intersection(label).area
         iou = intersection / (area1 + area2 - intersection)
         # print(area1, area2, intersection)
-        print(iou)
+        # print(iou)
         if iou > largest_iou:
             largest_iou = iou
             largest_idx = i
-    print('largest_idx:', largest_idx)
-    return largest_idx
+    print('largest_iou:', '<0.1' if largest_iou == 0.1 else largest_iou)
+    return largest_idx, largest_iou
+
+def balance(type_idxs):
+    '''
+    keep non object sample equal to object sample
+    '''
+    non_obj_idxs = []
+    keep_idxs = []
+    for obj_type, idxs in type_idxs.items():
+        if obj_type == 'NonObject':
+            non_obj_idxs += idxs
+        else:
+            keep_idxs += idxs
+    pos_sample_num = len(keep_idxs)
+    if len(non_obj_idxs) > pos_sample_num:
+        random.shuffle(non_obj_idxs)
+        type_idxs['NonObject'] = non_obj_idxs[:pos_sample_num]
+        keep_idxs += non_obj_idxs[:pos_sample_num]
+    return keep_idxs
+
+def print_statics(input_list, label_list, type_list, type_whitelist):
+    type_count = {key: {'pos_cnt': 0, 'all_cnt': 0, 'sample_num': 0} for key in type_whitelist}
+    for i in range(len(input_list)):
+        obj_type = type_list[i]
+        type_count[obj_type]['pos_cnt'] += np.sum(label_list[i])
+        type_count[obj_type]['all_cnt'] += input_list[i].shape[0]
+        type_count[obj_type]['sample_num'] += 1
+    for obj_type, stat in type_count.items():
+        print('------------- %s -------------' % obj_type)
+        print(stat)
+        if stat['sample_num'] > 0:
+            print('Average pos ratio: %f' % (stat['pos_cnt']/float(stat['all_cnt'])))
+        if stat['all_cnt'] > 0:
+            print('Average npoints: %f' % (float(stat['all_cnt'])/stat['sample_num']))
+        print('Sample numbers: %d' % stat['sample_num'])
 
 def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                        perturb_box2d=False, augmentX=1, type_whitelist=['Car'],
-                       kitti_path=os.path.join(ROOT_DIR,'dataset/KITTI/object')):
+                       kitti_path=os.path.join(ROOT_DIR,'dataset/KITTI/object'),
+                       balance_pos_neg=True):
     ''' Extract point clouds and corresponding annotations in frustums
         defined generated from 2D bounding boxes
         Lidar points and 3d boxes are in *rect camera* coord system
@@ -223,10 +258,9 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
     box3d_size_list = [] # array of l,w,h
     frustum_angle_list = [] # angle of 2d box center from pos x-axis
     roi_feature_list = [] # feature map crop for proposal region
-    type_count = {key: 0 for key in type_whitelist}
+    type_idxs = {key: [] for key in type_whitelist} # idxs of each type
 
-    pos_cnt = 0
-    all_cnt = 0
+    prop_idx = 0
     for data_idx in data_idx_list:
         print('------------- ', data_idx)
         calib = dataset.get_calibration(data_idx) # 3 by 4 matrix
@@ -244,7 +278,6 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
         pc_rect[:,3] = pc_velo[:,3]
 
-        # TODO: use avod feature map output
         gt_boxes_xy = []
         gt_boxes_3d = []
         objects = filter(lambda obj: obj.type in type_whitelist, objects)
@@ -253,11 +286,13 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
             gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
             gt_boxes_3d.append(gt_corners_3d)
 
+        proposals_in_frame = [] # all proposal boxes
         for prop in proposals:
             prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
             if prop_corners_image_2d is None:
                 print('skip proposal behind camera')
                 continue
+
             prop_box_xy = prop_corners_3d[:4, [0,2]]
             # get points within proposal box
             _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
@@ -265,7 +300,9 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
             # segmentation label
             label = np.zeros((pc_in_prop_box.shape[0]))
             # find corresponding label object
-            obj_idx = find_match_label(prop_box_xy, gt_boxes_xy)
+            obj_idx, iou_with_gt = find_match_label(prop_box_xy, gt_boxes_xy)
+            if obj_idx != -1:
+                proposals_in_frame.append(prop_corners_3d)
             if obj_idx == -1:
                 # non-object
                 obj_type = 'NonObject'
@@ -294,21 +331,9 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                 box2d_center_rect = calib.project_image_to_rect(uvdepth)
                 frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                     box2d_center_rect[0,0])
-
-                # visualize
-                # if obj_type == 'NonObject':
-                #     print('NonObject')
-                #     continue
-                # fig = draw_lidar(pc_rect)
-                # # fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
-                # fig = draw_gt_boxes3d([prop_corners_3d], fig, draw_text=False, color=(1, 0, 0))
-                # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
-                # raw_input()
-
             # Reject object without points
             # if np.sum(label)==0:
             #     continue
-
 
             id_list.append(data_idx)
             # box2d_list.append(np.array([xmin,ymin,xmax,ymax]))
@@ -320,16 +345,59 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
             box3d_size_list.append(box3d_size)
             frustum_angle_list.append(frustum_angle)
             roi_feature_list.append(prop.roi_features)
+            type_idxs[obj_type].append(prop_idx)
+            prop_idx += 1
+            # visualize one proposal
+            if viz and False:
+                import mayavi.mlab as mlab
+                from viz_util import draw_lidar, draw_gt_boxes3d
+                # if obj_type != 'NonObject':
+                # if obj_type != 'Pedestrian':
+                if obj_type == 'NonObject' or iou_with_gt > 0.2:
+                    continue
+                fig = draw_lidar(pc_rect)
+                fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
+                fig = draw_gt_boxes3d([prop_corners_3d], fig, draw_text=False, color=(1, 1, 1))
+                # roi_feature_map
+                roi_features_size = 7 * 7 * 32
+                img_roi_features = prop.roi_features[0:roi_features_size].reshape((7, 7, -1))
+                bev_roi_features = prop.roi_features[roi_features_size:].reshape((7, 7, -1))
+                img_roi_features = np.amax(img_roi_features, axis=-1)
+                bev_roi_features = np.amax(bev_roi_features, axis=-1)
+                fig1 = mlab.figure(figure=None, bgcolor=(0,0,0),
+                    fgcolor=None, engine=None, size=(500, 500))
+                fig2 = mlab.figure(figure=None, bgcolor=(0,0,0),
+                    fgcolor=None, engine=None, size=(500, 500))
+                mlab.imshow(img_roi_features, colormap='gist_earth', name='img_roi_features', figure=fig1)
+                mlab.imshow(bev_roi_features, colormap='gist_earth', name='bev_roi_features', figure=fig2)
+                # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
+                raw_input()
 
-            # collect statistics
-            pos_cnt += np.sum(label)
-            all_cnt += pc_in_prop_box.shape[0]
-            type_count[obj_type] += 1
+        # draw all proposal in frame
+        if viz:
+            import mayavi.mlab as mlab
+            from viz_util import draw_lidar, draw_gt_boxes3d
+            fig = draw_lidar(pc_rect)
+            fig = draw_gt_boxes3d(gt_boxes_3d, fig, color=(1, 0, 0))
+            fig = draw_gt_boxes3d(proposals_in_frame, fig, draw_text=False, color=(1, 1, 1))
+            raw_input()
 
-    print('Average pos ratio: %f' % (pos_cnt/float(all_cnt)))
-    print('Average npoints: %f' % (float(all_cnt)/len(id_list)))
-    print('Sample numbers: %d' % len(input_list))
-    print('Type count:', type_count)
+
+    if balance_pos_neg:
+        keep_idxs = balance(type_idxs)
+    else:
+        keep_idxs = [idx for sublist in type_idxs.values() for idx in sublist]
+    random.shuffle(keep_idxs)
+    id_list = [id_list[i] for i in keep_idxs]
+    box3d_list = [box3d_list[i] for i in keep_idxs]
+    input_list = [input_list[i] for i in keep_idxs]
+    label_list = [label_list[i] for i in keep_idxs]
+    type_list = [type_list[i] for i in keep_idxs]
+    heading_list = [heading_list[i] for i in keep_idxs]
+    box3d_size_list = [box3d_size_list[i] for i in keep_idxs]
+    frustum_angle_list = [frustum_angle_list[i] for i in keep_idxs]
+    roi_feature_list = [roi_feature_list[i] for i in keep_idxs]
+    print_statics(input_list, label_list, type_list, type_whitelist)
 
     with open(output_filename,'wb') as fp:
         pickle.dump(id_list, fp)
@@ -343,22 +411,23 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
         pickle.dump(frustum_angle_list, fp)
         pickle.dump(roi_feature_list, fp)
 
-    if viz:
-        import mayavi.mlab as mlab
-        for i in range(len(id_list)):
-            if type_list[i] == 'NonObject':
-                continue
-            p1 = input_list[i]
-            seg = label_list[i]
-            fig = mlab.figure(figure=None, bgcolor=(0.4,0.4,0.4),
-                fgcolor=None, engine=None, size=(500, 500))
-            mlab.points3d(p1[:,0], p1[:,1], p1[:,2], seg, mode='point',
-                colormap='gnuplot', scale_factor=1, figure=fig)
-            fig = mlab.figure(figure=None, bgcolor=(0.4,0.4,0.4),
-                fgcolor=None, engine=None, size=(500, 500))
-            mlab.points3d(p1[:,2], -p1[:,0], -p1[:,1], seg, mode='point',
-                colormap='gnuplot', scale_factor=1, figure=fig)
-            raw_input()
+    # show segmentation
+    # if viz:
+    #     import mayavi.mlab as mlab
+    #     for i in range(len(id_list)):
+    #         if type_list[i] == 'NonObject':
+    #             continue
+    #         p1 = input_list[i]
+    #         seg = label_list[i]
+    #         fig = mlab.figure(figure=None, bgcolor=(0.4,0.4,0.4),
+    #             fgcolor=None, engine=None, size=(500, 500))
+    #         mlab.points3d(p1[:,0], p1[:,1], p1[:,2], seg, mode='point',
+    #             colormap='gnuplot', scale_factor=1, figure=fig)
+    #         fig = mlab.figure(figure=None, bgcolor=(0.4,0.4,0.4),
+    #             fgcolor=None, engine=None, size=(500, 500))
+    #         mlab.points3d(p1[:,2], -p1[:,0], -p1[:,1], seg, mode='point',
+    #             colormap='gnuplot', scale_factor=1, figure=fig)
+    #         raw_input()
 
 def get_box3d_dim_statistics(idx_filename):
     ''' Collect and dump 3D bounding box statistics '''
