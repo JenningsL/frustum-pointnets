@@ -120,7 +120,7 @@ def train():
             # Get model and losses
             end_points = MODEL.get_model(pointclouds_pl, features_pl,
                 is_training_pl, bn_decay=bn_decay)
-            loss = MODEL.get_loss(cls_labels_pl, labels_pl, centers_pl,
+            loss, loss_endpoints = MODEL.get_loss(cls_labels_pl, labels_pl, centers_pl,
                 heading_class_label_pl, heading_residual_label_pl,
                 size_class_label_pl, size_residual_label_pl, end_points)
             tf.summary.scalar('loss', loss)
@@ -199,6 +199,7 @@ def train():
                'cls_logits': end_points['cls_logits'],
                'centers_pred': end_points['center'],
                'loss': loss,
+               'loss_endpoints': loss_endpoints,
                'train_op': train_op,
                'merged': merged,
                'step': batch,
@@ -279,7 +280,7 @@ def train_one_epoch(sess, ops, train_writer):
         total_cls_seen += BATCH_SIZE
         # only calculate seg acc and regression performance with object labels
         obj_mask = batch_cls_label < 3
-        obj_sample_num = len(obj_mask)
+        obj_sample_num = np.sum(obj_mask)
         total_obj_sample += obj_sample_num
         # segmentation acc
         preds_val = np.argmax(logits_val, 2)
@@ -349,7 +350,6 @@ def eval_one_epoch(sess, ops, test_writer):
         batch_rot_angle, batch_feature_vec = \
             get_batch(TEST_DATASET, test_idxs, start_idx, end_idx,
                 NUM_POINT, NUM_CHANNEL)
-
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
                      ops['cls_label_pl']: batch_cls_label,
@@ -361,12 +361,15 @@ def eval_one_epoch(sess, ops, test_writer):
                      ops['size_residual_label_pl']: batch_sres,
                      ops['is_training_pl']: is_training}
 
-        summary, step, loss_val, cls_logits_val, logits_val, iou2ds, iou3ds = \
+        summary, step, loss_val, loss_endpoints, cls_logits_val, logits_val, iou2ds, iou3ds = \
             sess.run([ops['merged'], ops['step'],
-                ops['loss'], ops['cls_logits'], ops['logits'],
+                ops['loss'], ops['loss_endpoints'], ops['cls_logits'], ops['logits'],
                 ops['end_points']['iou2ds'], ops['end_points']['iou3ds']],
                 feed_dict=feed_dict)
         test_writer.add_summary(summary, step)
+        if np.isnan(loss_val):
+            print('nan loss in batch: ', batch_idx)
+            print('loss_endpoints: ', loss_endpoints)
 
         # classification acc
         cls_preds_val = np.argmax(cls_logits_val, 1)
@@ -379,7 +382,7 @@ def eval_one_epoch(sess, ops, test_writer):
 
         # only calculate seg acc and regression performance with object labels
         obj_mask = batch_cls_label < 3
-        obj_sample_num = len(obj_mask)
+        obj_sample_num = np.sum(obj_mask)
         total_obj_sample += obj_sample_num
         # segmentation acc
         preds_val = np.argmax(logits_val, 2)
