@@ -139,8 +139,8 @@ def random_shift_box3d(obj, shift_ratio=0.1):
     r = shift_ratio
     # 0.9 to 1.1
     obj.w = obj.w*(1+np.random.random()*2*r-r)
-    obj.l = obj.w*(1+np.random.random()*2*r-r)
-    obj.h = obj.w*(1+np.random.random()*2*r-r)
+    obj.l = obj.l*(1+np.random.random()*2*r-r)
+    obj.h = obj.h*(1+np.random.random()*2*r-r)
     return obj
 
 def iou_2d(box1, box2):
@@ -182,7 +182,7 @@ def find_match_label(prop_corners, labels_corners, iou_threshold=0.5):
         if iou > largest_iou:
             largest_iou = iou
             largest_idx = i
-    print('largest_iou:', '<0.1' if largest_iou == 0.1 else largest_iou)
+    # print('largest_iou:', '<0.1' if largest_iou == 0.1 else largest_iou)
     return largest_idx, largest_iou
 
 def balance(type_idxs):
@@ -374,6 +374,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                     # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
                     raw_input()
 
+        print('%d augmented proposal in frame %d' % (len(proposals_in_frame), data_idx))
         # draw all proposal in frame
         if viz:
             import mayavi.mlab as mlab
