@@ -138,9 +138,11 @@ def random_shift_box3d(obj, shift_ratio=0.1):
     '''
     r = shift_ratio
     # 0.9 to 1.1
+    obj.t[0] = obj.t[0] + obj.l*r*(np.random.random()*2-1)
+    obj.t[1] = obj.t[1] + obj.w*r*(np.random.random()*2-1)
     obj.w = obj.w*(1+np.random.random()*2*r-r)
     obj.l = obj.l*(1+np.random.random()*2*r-r)
-    obj.h = obj.h*(1+np.random.random()*2*r-r)
+    # obj.h = obj.h*(1+np.random.random()*2*r-r)
     return obj
 
 def iou_2d(box1, box2):
@@ -298,6 +300,8 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                 # get points within proposal box
                 _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
                 pc_in_prop_box = pc_rect[prop_inds,:]
+                # shuffle points order
+                np.random.shuffle(pc_in_prop_box)
                 # segmentation label
                 label = np.zeros((pc_in_prop_box.shape[0]))
                 # find corresponding label object
@@ -354,7 +358,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                     from viz_util import draw_lidar, draw_gt_boxes3d
                     # if obj_type != 'NonObject':
                     # if obj_type != 'Pedestrian':
-                    if obj_type == 'NonObject' or iou_with_gt > 0.2:
+                    if obj_type == 'NonObject':
                         continue
                     fig = draw_lidar(pc_rect)
                     fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
