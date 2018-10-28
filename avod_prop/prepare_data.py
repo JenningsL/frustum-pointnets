@@ -267,7 +267,7 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
         objects = dataset.get_label_objects(data_idx)
         # proposal boxes
         try:
-            proposals = dataset.get_proposals(data_idx)
+            proposals = dataset.get_proposals(data_idx, rpn_score_threshold=0.1, nms_iou_thres=0.8)
         except Exception, e:
             print(e)
             print('proposal not found for: ', data_idx)
@@ -486,7 +486,7 @@ if __name__=='__main__':
             os.path.join(BASE_DIR, 'image_sets/train.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'train.pickle'),
-            viz=False, perturb_box3d=True, augmentX=5,
+            viz=False, perturb_box3d=True, augmentX=3,
             type_whitelist=type_whitelist,
             kitti_path=args.kitti_path)
 

@@ -32,8 +32,9 @@ def print_statics(recall_num, total_obj, type_whitelist):
         if total_obj[obj_type] > 0:
             type_recall = float(recall_num[obj_type])/total_obj[obj_type]
             print('Recall for {0} is {1:.4f}'.format(obj_type, type_recall))
-    total_recall = float(sum(recall_num.values())) / sum(total_obj.values())
-    print('Total recall: {0:.4f}'.format(total_recall))
+    if sum(total_obj.values()) > 0:
+        total_recall = float(sum(recall_num.values())) / sum(total_obj.values())
+        print('Total recall: {0:.4f}'.format(total_recall))
 
 def main():
     parser = argparse.ArgumentParser()
@@ -62,7 +63,7 @@ def main():
         calib = dataset.get_calibration(data_idx) # 3 by 4 matrix
         # ground truth
         objects = dataset.get_label_objects(data_idx)
-        proposals = dataset.get_proposals(data_idx, rpn_score_threshold=0.1, nms_iou_thres=0.7)
+        proposals = dataset.get_proposals(data_idx, rpn_score_threshold=0.1, nms_iou_thres=0.8)
         pc_velo = dataset.get_lidar(data_idx)
         pc_rect = np.zeros_like(pc_velo)
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
@@ -78,7 +79,10 @@ def main():
             # 0 - easy, 1 - medium, 2 - hard
             if obj.difficulty not in [0, 1]:
                 continue
-            _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
+            gt_image_2d, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
+            if gt_image_2d is None:
+                print('skip proposal behind camera')
+                continue
             gt_bev = Polygon(gt_corners_3d[:4, [0,2]])
 
             if is_recall(gt_bev, props_bev):
