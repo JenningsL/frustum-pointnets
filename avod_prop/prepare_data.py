@@ -221,6 +221,25 @@ def print_statics(input_list, label_list, type_list, type_whitelist):
             print('Average npoints: %f' % (float(stat['all_cnt'])/stat['sample_num']))
         print('Sample numbers: %d' % stat['sample_num'])
 
+def get_proposal_from_label(label, calib, type_list):
+    '''
+    construct proposal from label
+    '''
+    _, corners_3d = utils.compute_box_3d(label, calib.P)
+    # wrap ground truth with box parallel to axis
+    bev_box = corners_3d[:4, [0,2]]
+    xmax = bev_box[:, 0].max(axis=0)
+    ymax = bev_box[:, 1].max(axis=0)
+    xmin = bev_box[:, 0].min(axis=0)
+    ymin = bev_box[:, 1].min(axis=0)
+    l = xmax - xmin
+    w = ymax - ymin
+    h = label.h
+    # TODO: fake roi_features
+    roi_features = np.ones(7 * 7 * 32) * type_list.index(label.type)
+
+    return ProposalObject(list(label.t) + [l, w, h, 0.0], 1, label.type, roi_features)
+
 def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                        perturb_box3d=False, augmentX=1, type_whitelist=['Car'],
                        kitti_path=os.path.join(ROOT_DIR,'dataset/KITTI/object'),
@@ -284,6 +303,9 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
             _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
             gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
             gt_boxes_3d.append(gt_corners_3d)
+            # generate proposal from label to ensure recall
+            true_prop = get_proposal_from_label(obj, calib, type_whitelist)
+            proposals.append(true_prop)
 
         proposals_in_frame = [] # all proposal boxes
         for prop_ in proposals:
