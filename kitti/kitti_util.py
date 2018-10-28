@@ -10,6 +10,11 @@ import cv2
 import os
 
 class Object3d(object):
+    # 0 - easy, 1 - medium, 2 - hard
+    HEIGHT = (40, 25, 25)
+    OCCLUSION = (0, 1, 2)
+    TRUNCATION = (0.15, 0.3, 0.5)
+
     ''' 3d object label '''
     def __init__(self, label_file_line):
         data = label_file_line.split(' ')
@@ -34,6 +39,17 @@ class Object3d(object):
         self.l = data[10] # box length (in meters)
         self.t = (data[11],data[12],data[13]) # location (x,y,z) in camera coord.
         self.ry = data[14] # yaw angle (around Y-axis in camera coordinates) [-pi..pi]
+        self.difficulty = self._get_difficulty()
+
+    def _get_difficulty(self):
+        difficulty = 0
+        for i in range(3):
+            if not ((self.occlusion <= self.OCCLUSION[i]) and
+                (self.truncation <= self.TRUNCATION[i]) and
+                (self.ymax - self.ymin) >= self.HEIGHT[i]):
+                difficulty += 1
+        difficulty = min(2, difficulty)
+        return difficulty
 
     def print_object(self):
         print('Type, truncation, occlusion, alpha: %s, %d, %d, %f' % \
