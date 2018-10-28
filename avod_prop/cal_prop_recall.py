@@ -20,7 +20,8 @@ def is_recall(label, proposals, cover_threshold=0.7):
     for prop in proposals:
         intersection = label.intersection(prop).area
         iou = intersection / (prop.area + label.area - intersection)
-        if intersection / label.area > cover_threshold and iou > 0.5:
+        # if intersection / label.area > cover_threshold and iou > 0.5:
+        if iou > 0.5:
             return True
     return False
 
