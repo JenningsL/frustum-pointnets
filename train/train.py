@@ -118,7 +118,7 @@ def train():
             tf.summary.scalar('bn_decay', bn_decay)
 
             # Get model and losses
-            end_points = MODEL.get_model(pointclouds_pl, features_pl,
+            end_points = MODEL.get_model(pointclouds_pl, cls_labels_pl, features_pl,
                 is_training_pl, bn_decay=bn_decay)
             loss, loss_endpoints = MODEL.get_loss(cls_labels_pl, labels_pl, centers_pl,
                 heading_class_label_pl, heading_residual_label_pl,

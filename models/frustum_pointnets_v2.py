@@ -60,8 +60,10 @@ def get_instance_seg_v2_net(point_cloud, feature_vec,
     cls_net = tf_util.fully_connected(cls_net, 4, activation_fn=None, scope='cls_fc3')
     end_points['cls_logits'] = cls_net
 
+    cls_label_pred = tf.argmax(tf.nn.softmax(end_points['cls_logits']), axis=1)
+    end_points['one_hot_vec'] = tf.one_hot(cls_label_pred, 4)
     # Feature Propagation layers
-    l3_points = tf.concat([l3_points, tf.expand_dims(feature_vec, 1)], axis=2)
+    l3_points = tf.concat([l3_points, tf.expand_dims(end_points['one_hot_vec'], 1)], axis=2)
     l2_points = pointnet_fp_module(l2_xyz, l3_xyz, l2_points, l3_points,
         [128,128], is_training, bn_decay, scope='fa_layer1')
     l1_points = pointnet_fp_module(l1_xyz, l2_xyz, l1_points, l2_points,
@@ -129,7 +131,7 @@ def get_3d_box_estimation_v2_net(object_point_cloud, feature_vec,
     return output, end_points
 
 
-def get_model(point_cloud, feature_vec, is_training, bn_decay=None):
+def get_model(point_cloud, cls_label, feature_vec, is_training, bn_decay=None):
     ''' Frustum PointNets model. The model predict 3D object masks and
     amodel bounding boxes for objects in frustum point clouds.
 
@@ -159,7 +161,7 @@ def get_model(point_cloud, feature_vec, is_training, bn_decay=None):
 
     # T-Net and coordinate translation
     center_delta, end_points = get_center_regression_net(\
-        object_point_cloud_xyz, feature_vec,
+        object_point_cloud_xyz, end_points['one_hot_vec'],
         is_training, bn_decay, end_points)
     stage1_center = center_delta + mask_xyz_mean # Bx3
     end_points['stage1_center'] = stage1_center
@@ -169,7 +171,7 @@ def get_model(point_cloud, feature_vec, is_training, bn_decay=None):
 
     # Amodel Box Estimation PointNet
     output, end_points = get_3d_box_estimation_v2_net(\
-        object_point_cloud_xyz_new, feature_vec,
+        object_point_cloud_xyz_new, end_points['one_hot_vec'],
         is_training, bn_decay, end_points)
 
     # Parse output to 3D box parameters
