@@ -236,14 +236,14 @@ def get_proposal_from_label(label, calib, type_list):
     w = ymax - ymin
     h = label.h
     # TODO: fake roi_features
-    roi_features = np.ones(7 * 7 * 32) * type_list.index(label.type)
+    roi_features = np.ones(7 * 7 * 32 * 2) * type_list.index(label.type)
 
     return ProposalObject(list(label.t) + [l, w, h, 0.0], 1, label.type, roi_features)
 
 def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                        perturb_box3d=False, augmentX=1, type_whitelist=['Car'],
                        kitti_path=os.path.join(ROOT_DIR,'dataset/KITTI/object'),
-                       balance_pos_neg=True):
+                       balance_pos_neg=True, source='label'):
     ''' Extract point clouds and corresponding annotations in frustums
         defined generated from 2D bounding boxes
         Lidar points and 3d boxes are in *rect camera* coord system
@@ -284,13 +284,12 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
         calib = dataset.get_calibration(data_idx) # 3 by 4 matrix
         # ground truth
         objects = dataset.get_label_objects(data_idx)
-        # proposal boxes
-        try:
+        # proposal boxes from avod
+        if source == 'avod':
             proposals = dataset.get_proposals(data_idx, rpn_score_threshold=0.1, nms_iou_thres=0.8)
-        except Exception, e:
-            print(e)
-            print('proposal not found for: ', data_idx)
-            continue
+        else:
+            proposals = []
+
         pc_velo = dataset.get_lidar(data_idx)
         pc_rect = np.zeros_like(pc_velo)
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
@@ -303,9 +302,10 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
             _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
             gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
             gt_boxes_3d.append(gt_corners_3d)
-            # generate proposal from label to ensure recall
-            true_prop = get_proposal_from_label(obj, calib, type_whitelist)
-            proposals.append(true_prop)
+            if source == 'label':
+                # generate proposal from label to ensure recall
+                true_prop = get_proposal_from_label(obj, calib, type_whitelist)
+                proposals.append(true_prop)
 
         proposals_in_frame = [] # all proposal boxes
         for prop_ in proposals:
@@ -488,6 +488,7 @@ if __name__=='__main__':
     parser.add_argument('--gen_val_rgb_detection', action='store_true', help='Generate val split frustum data with RGB detection 2D boxes')
     parser.add_argument('--car_only', action='store_true', help='Only generate cars; otherwise cars, peds and cycs')
     parser.add_argument('--kitti_path', help='Path to Kitti Object Data')
+    parser.add_argument('--prop_source', help='How to generate proposals, label/avod')
     args = parser.parse_args()
 
     if args.demo:
@@ -502,15 +503,17 @@ if __name__=='__main__':
         output_prefix = 'frustum_carpedcyc_'
 
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    print(BASE_DIR)
+    if args.prop_source not in ['label', 'source']:
+        raise Exception('Unknown proposal source')
+        exit()
     if args.gen_train:
         extract_proposal_data(\
             os.path.join(BASE_DIR, 'image_sets/train.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'train.pickle'),
-            viz=False, perturb_box3d=True, augmentX=3,
+            viz=False, perturb_box3d=True, augmentX=5,
             type_whitelist=type_whitelist,
-            kitti_path=args.kitti_path)
+            kitti_path=args.kitti_path, source=args.prop_source)
 
     if args.gen_val:
         extract_proposal_data(\
@@ -519,4 +522,4 @@ if __name__=='__main__':
             os.path.join(BASE_DIR, output_prefix+'val.pickle'),
             viz=False, perturb_box3d=False, augmentX=1,
             type_whitelist=type_whitelist,
-            kitti_path=args.kitti_path)
+            kitti_path=args.kitti_path, source=args.prop_source)
