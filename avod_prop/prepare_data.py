@@ -503,7 +503,7 @@ if __name__=='__main__':
         output_prefix = 'frustum_carpedcyc_'
 
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    if args.prop_source not in ['label', 'source']:
+    if args.prop_source not in ['label', 'avod']:
         raise Exception('Unknown proposal source')
         exit()
     if args.gen_train:
