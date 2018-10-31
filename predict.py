@@ -2,6 +2,7 @@ import tensorflow as tf
 import os
 import sys
 import argparse
+import numpy as np
 
 from avod.core import box_3d_encoder
 from avod.core import evaluator_utils
@@ -173,7 +174,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     rpn_predictions = sess1.run(rpn_endpoints, feed_dict=feed_dict1)
     top_anchors = rpn_predictions[RpnModel.PRED_TOP_ANCHORS]
     top_proposals = box_3d_encoder.anchors_to_box_3d(top_anchors)
-    softmax_scores = predictions[RpnModel.PRED_TOP_OBJECTNESS_SOFTMAX]
+    softmax_scores = rpn_predictions[RpnModel.PRED_TOP_OBJECTNESS_SOFTMAX]
 
     proposals_and_scores = np.column_stack((top_proposals,
                                             softmax_scores))
