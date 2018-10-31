@@ -1,10 +1,14 @@
 import tensorflow as tf
+import os
+import sys
+import argparse
 
 from avod.core import box_3d_encoder
 from avod.core import evaluator_utils
 from avod.core import summary_utils
 from avod.core import trainer_utils
 from avod.core.models.rpn_model import RpnModel
+import avod.builders.config_builder_util as config_builder
 from avod.builders.dataset_builder import DatasetBuilder
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -80,7 +84,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     # Switch path drop off during evaluation
     model_config.path_drop_probabilities = [1.0, 1.0]
 
-    dataset = get_dataset(dataset_config, 'test')
+    dataset = get_dataset(dataset_config, 'val')
 
     rpn_endpoints, sess1, rpn_model = get_proposal_network(model_config, dataset, rpn_model_path)
     detect_endpoints, sess2 = get_detection_network()
