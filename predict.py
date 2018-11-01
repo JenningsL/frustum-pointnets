@@ -3,6 +3,7 @@ import os
 import sys
 import argparse
 import numpy as np
+import pickle
 
 from avod.core import box_3d_encoder
 from avod.core import evaluator_utils
@@ -19,7 +20,20 @@ sys.path.append(os.path.join(ROOT_DIR, 'models'))
 import frustum_pointnets_v2
 sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
 
+class ProposalObject(object):
+    def __init__(self, box_3d, score=0.0, type='Car', roi_features=None):
+        # [x, y, z, l, w, h, ry]
+        self.t = box_3d[0:3]
+        self.l = box_3d[3]
+        self.w = box_3d[4]
+        self.h = box_3d[5]
+        self.ry = box_3d[6]
+        self.score = score
+        self.type = type
+        self.roi_features = roi_features
+
 batch_size = 32 # for PointNet
+num_point = 512
 
 def get_proposal_network(model_config, dataset, model_path, GPU_INDEX=0):
     with tf.Graph().as_default():
@@ -42,10 +56,13 @@ def get_detection_network(model_path, GPU_INDEX=0):
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
             placeholders = frustum_pointnets_v2.placeholder_inputs(batch_size, num_point)
-            pointclouds_pl, feature_vec_pl = placeholders[:2]
+            pointclouds_pl, feature_vec_pl, cls_label_pl = placeholders[:3]
             is_training_pl = tf.placeholder(tf.bool, shape=())
-            end_points = frustum_pointnets_v2.get_model(pointclouds_pl, feature_vec_pl,
+            end_points = frustum_pointnets_v2.get_model(pointclouds_pl, cls_label_pl, feature_vec_pl,
                 is_training_pl)
+            end_points['pointclouds_pl'] = pointclouds_pl
+            end_points['features_pl'] = feature_vec_pl
+            end_points['is_training_pl'] = is_training_pl
             saver = tf.train.Saver()
         # Create a session
         config = tf.ConfigProto()
@@ -119,6 +136,7 @@ def compute_box_3d(obj):
     corners_3d[0,:] = corners_3d[0,:] + obj.t[0];
     corners_3d[1,:] = corners_3d[1,:] + obj.t[1];
     corners_3d[2,:] = corners_3d[2,:] + obj.t[2];
+    return corners_3d.T
 
 def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_threshold=0.1):
     proposal_boxes_3d = proposals_and_scores[:, 0:7]
@@ -129,28 +147,34 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     proposal_scores = proposal_scores[score_mask]
     roi_features = roi_features[score_mask]
     # point cloud of this frame
-    pc = sample[constants.KEY_POINT_CLOUD]
-    frame_calib = sample[constants.KEY_STEREO_CALIB_P2]
-    pc = calib_utils.lidar_to_cam_frame(pc, frame_calib)
+    pc = sample[constants.KEY_POINT_CLOUD].T
+    frame_calib = sample[constants.KEY_STEREO_CALIB]
+    #pc = calib_utils.lidar_to_cam_frame(pc.T, frame_calib)
     # point cloud in proposals
     point_clouds = []
     features = []
     for box_3d, feat in zip(proposal_boxes_3d, roi_features):
-        obj = Object()
-        obj.t = box_3d[0:3]
-        obj.l = box_3d[3]
-        obj.w = box_3d[4]
-        obj.h = box_3d[5]
-        obj.ry = box_3d[6]
-        corners = compute_box_3d(box_3d)
+        obj = ProposalObject(box_3d, 1, None, None)
+        corners = compute_box_3d(obj)
+        #corners = calib_utils.lidar_to_cam_frame(corners, frame_calib)
         _, inds = extract_pc_in_box3d(pc, corners)
-        if (len(inds < 0)):
+        if (np.any(inds) == False):
             # skip proposal with no points
             continue
-        point_clouds.append(pc[inds])
+        # TODO: rotate to center
+        point_set = pc[inds]
+        choice = np.random.choice(point_set.shape[0], num_point, replace=True)
+        point_set = point_set[choice, :]
+        point_clouds.append(point_set)
         features.append(feat)
     return point_clouds, features
 
+def softmax(x):
+    ''' Numpy function for softmax'''
+    shape = x.shape
+    probs = np.exp(x - np.max(x, axis=len(shape)-1, keepdims=True))
+    probs /= np.sum(probs, axis=len(shape)-1, keepdims=True)
+    return probs
 
 def inference(rpn_model_path, detect_model_path, avod_config_path):
     model_config, _, eval_config, dataset_config = \
@@ -165,7 +189,6 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     model_config.path_drop_probabilities = [1.0, 1.0]
 
     dataset = get_dataset(dataset_config, 'val')
-
     # run avod proposal network
     rpn_endpoints, sess1, rpn_model = get_proposal_network(model_config, dataset, rpn_model_path)
 
@@ -178,27 +201,36 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
 
     proposals_and_scores = np.column_stack((top_proposals,
                                             softmax_scores))
-    print(proposals_and_scores)
+    top_img_roi = rpn_predictions[RpnModel.PRED_TOP_IMG_ROI]
+    top_bev_roi = rpn_predictions[RpnModel.PRED_TOP_BEV_ROI]
+    print(top_img_roi.shape)
+    roi_num = len(top_img_roi)
+    top_img_roi = np.reshape(top_img_roi, (roi_num, -1))
+    top_bev_roi = np.reshape(top_bev_roi, (roi_num, -1))
+    roi_features = np.column_stack((top_img_roi, top_bev_roi))
+    '''
+    pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out", "wb"))
+    data_dump = pickle.load(open("rpn_out", "rb"))
+    proposals_and_scores = data_dump['proposals_and_scores']
+    roi_features = data_dump['roi_features']
+    kitti_samples = dataset.load_samples([0])
+    '''
     # run frustum_pointnets_v2
-    detect_endpoints, sess2 = get_detection_network(detect_model_path)
+    end_points, sess2 = get_detection_network(detect_model_path)
     point_clouds, feature_vec = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
     feed_dict = {\
-        ops['pointclouds_pl']: point_clouds[:batch_size],
-        ops['features_pl']: feature_vec[:batch_size],
-        ops['is_training_pl']: False}
+        end_points['pointclouds_pl']: point_clouds[:batch_size],
+        end_points['features_pl']: feature_vec[:batch_size],
+        end_points['is_training_pl']: False}
 
     batch_logits, batch_centers, \
     batch_heading_scores, batch_heading_residuals, \
     batch_size_scores, batch_size_residuals = \
-        sess.run(end_points['cls_logits'], end_points['center'],
+        sess2.run([end_points['cls_logits'], end_points['center'],
             end_points['heading_scores'], end_points['heading_residuals'],
             end_points['size_scores'], end_points['size_residuals']],
             feed_dict=feed_dict)
     print(batch_logits)
-    # Compute scores
-    heading_prob = np.max(softmax(batch_heading_scores),1) # B
-    size_prob = np.max(softmax(batch_size_scores),1) # B,
-    batch_scores = np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
 
 
 def main():
