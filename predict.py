@@ -168,17 +168,10 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     proposal_boxes_3d = proposal_boxes_3d[score_mask]
     proposal_scores = proposal_scores[score_mask]
     roi_features = roi_features[score_mask]
-    # TODO: nms
+
     proposal_objs = list(map(lambda pair: ProposalObject(pair[0], pair[1], None, None), zip(proposal_boxes_3d, proposal_scores)))
     propsasl_corners = list(map(lambda obj: compute_box_3d(obj), proposal_objs))
-    bev_boxes = list(map(lambda bs: [bs[0][1][0], bs[0][1][2], bs[0][3][0], bs[0][3][2], bs[1]], zip(propsasl_corners, proposal_scores)))
-    bev_boxes = np.array(bev_boxes)
-    print('before nms: {0}'.format(len(bev_boxes)))
-    nms_idxs = non_max_suppression(bev_boxes, 0.8)
-    print('after nms: {0}'.format(len(nms_idxs)))
-    proposal_objs = [proposal_objs[i] for i in nms_idxs]
-    propsasl_corners = [propsasl_corners[i] for i in nms_idxs]
-    roi_features = roi_features[nms_idxs]
+
     # point cloud of this frame
     pc = sample[constants.KEY_POINT_CLOUD].T
     frame_calib = sample[constants.KEY_STEREO_CALIB]
@@ -272,6 +265,8 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     size_res = np.vstack([size_residuals[i,size_cls[i],:] \
         for i in range(sample_num)])
 
+    # TODO: nms on output
+    output = []
     for i in range(sample_num):
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
             heading_cls[i], heading_res[i],
@@ -279,6 +274,8 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         obj_type = type_cls[i]
         confidence = scores[i]
         print(h,w,l,tx,ty,tz,ry,obj_type,confidence)
+        output.append([h,w,l,tx,ty,tz,ry,obj_type,confidence])
+    pickle.dump(output, open("final_out", "wb"))
 
 def inference(rpn_model_path, detect_model_path, avod_config_path):
     model_config, _, eval_config, dataset_config = \
