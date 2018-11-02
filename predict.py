@@ -4,6 +4,7 @@ import sys
 import argparse
 import numpy as np
 import pickle
+import math
 
 from avod.core import box_3d_encoder
 from avod.core import evaluator_utils
@@ -20,6 +21,8 @@ sys.path.append(os.path.join(ROOT_DIR, 'models'))
 import frustum_pointnets_v2
 sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
 # sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
+sys.path.append(os.path.join(ROOT_DIR, 'train'))
+import provider
 
 class ProposalObject(object):
     def __init__(self, box_3d, score=0.0, type='Car', roi_features=None):
@@ -35,6 +38,8 @@ class ProposalObject(object):
 
 batch_size = 32 # for PointNet
 num_point = 512
+NUM_CLASSES = 4
+from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER
 
 def rotate_pc_along_y(pc, rot_angle):
     '''
@@ -204,7 +209,7 @@ def softmax(x):
     probs /= np.sum(probs, axis=len(shape)-1, keepdims=True)
     return probs
 
-def detect_batch(point_clouds, feature_vec, rot_angle_list):
+def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     sample_num = len(point_clouds)
     logits = np.zeros((sample_num, NUM_CLASSES))
     centers = np.zeros((sample_num, 3))
@@ -225,7 +230,7 @@ def detect_batch(point_clouds, feature_vec, rot_angle_list):
         batch_logits, batch_seg_logits, batch_centers, \
         batch_heading_scores, batch_heading_residuals, \
         batch_size_scores, batch_size_residuals = \
-            sess2.run([end_points['cls_logits'], end_points['mask_logits'], ['center'],
+            sess.run([end_points['cls_logits'], end_points['mask_logits'], end_points['center'],
                 end_points['heading_scores'], end_points['heading_residuals'],
                 end_points['size_scores'], end_points['size_residuals']],
                 feed_dict=feed_dict)
@@ -279,6 +284,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     model_config.path_drop_probabilities = [1.0, 1.0]
 
     dataset = get_dataset(dataset_config, 'val')
+    '''
     # run avod proposal network
     rpn_endpoints, sess1, rpn_model = get_proposal_network(model_config, dataset, rpn_model_path)
 
@@ -299,16 +305,15 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     top_bev_roi = np.reshape(top_bev_roi, (roi_num, -1))
     roi_features = np.column_stack((top_img_roi, top_bev_roi))
     '''
-    pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out", "wb"))
+    #pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out", "wb"))
     data_dump = pickle.load(open("rpn_out", "rb"))
     proposals_and_scores = data_dump['proposals_and_scores']
     roi_features = data_dump['roi_features']
     kitti_samples = dataset.load_samples([0])
-    '''
     # run frustum_pointnets_v2
     end_points, sess2 = get_detection_network(detect_model_path)
     point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
-    detect_batch(point_clouds, feature_vec, rot_angle_list)
+    detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
     # feed_dict = {\
     #     end_points['pointclouds_pl']: point_clouds[:batch_size],
     #     end_points['features_pl']: feature_vec[:batch_size],

@@ -5,7 +5,8 @@ Date: September 2017
 '''
 from __future__ import print_function
 
-import cPickle as pickle
+#import cPickle as pickle
+import pickle
 import sys
 import os
 import numpy as np
@@ -158,6 +159,8 @@ class FrustumDataset(object):
 
         if self.extra_feature:
             feature_vec = self.roi_features[index]
+            if feature_vec.shape[0] == 1568:
+                feature_vec = np.tile(feature_vec, 2)
 
         # Get point cloud
         if self.rotate_to_center:
