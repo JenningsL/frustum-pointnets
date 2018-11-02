@@ -9,7 +9,8 @@ sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
 sys.path.append(os.path.join(BASE_DIR, '../kitti'))
 import kitti_util as utils
-import cPickle as pickle
+# import cPickle as pickle
+import pickle
 from kitti_object import *
 
 def non_max_suppression(boxes, overlapThresh):
