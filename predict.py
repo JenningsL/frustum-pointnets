@@ -20,6 +20,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
 import frustum_pointnets_v2
 sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
+from kitti_object_avod import non_max_suppression
 # sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
 sys.path.append(os.path.join(ROOT_DIR, 'train'))
 import provider
@@ -167,6 +168,17 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     proposal_boxes_3d = proposal_boxes_3d[score_mask]
     proposal_scores = proposal_scores[score_mask]
     roi_features = roi_features[score_mask]
+    # TODO: nms
+    proposal_objs = list(map(lambda pair: ProposalObject(pair[0], pair[1], None, None), zip(proposal_boxes_3d, proposal_scores)))
+    propsasl_corners = list(map(lambda obj: compute_box_3d(obj), proposal_objs))
+    bev_boxes = list(map(lambda bs: [bs[0][1][0], bs[0][1][2], bs[0][3][0], bs[0][3][2], bs[1]], zip(propsasl_corners, proposal_scores)))
+    bev_boxes = np.array(bev_boxes)
+    print('before nms: {0}'.format(len(bev_boxes)))
+    nms_idxs = non_max_suppression(bev_boxes, 0.8)
+    print('after nms: {0}'.format(len(nms_idxs)))
+    proposal_objs = [proposal_objs[i] for i in nms_idxs]
+    propsasl_corners = [propsasl_corners[i] for i in nms_idxs]
+    roi_features = roi_features[nms_idxs]
     # point cloud of this frame
     pc = sample[constants.KEY_POINT_CLOUD].T
     frame_calib = sample[constants.KEY_STEREO_CALIB]
@@ -175,9 +187,7 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     point_clouds = []
     features = []
     rot_angle_list = []
-    for box_3d, feat in zip(proposal_boxes_3d, roi_features):
-        obj = ProposalObject(box_3d, 1, None, None)
-        corners = compute_box_3d(obj)
+    for obj, corners, feat in zip(proposal_objs, propsasl_corners, roi_features):
         #corners = calib_utils.lidar_to_cam_frame(corners, frame_calib)
         _, inds = extract_pc_in_box3d(pc, corners)
         if (np.any(inds) == False):
@@ -244,14 +254,14 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
 
         # Compute scores
         batch_cls_prob = np.max(softmax(batch_logits),1) # B,
-        batch_seg_prob = softmax(batch_seg_logits)[:,:,1] # BxN
-        batch_seg_mask = np.argmax(batch_seg_logits, 2) # BxN
-        mask_mean_prob = np.sum(batch_seg_prob * batch_seg_mask, 1) # B,
-        mask_mean_prob = mask_mean_prob / np.sum(batch_seg_mask,1) # B,
-        heading_prob = np.max(softmax(batch_heading_scores),1) # B
-        size_prob = np.max(softmax(batch_size_scores),1) # B,
-        batch_scores = np.log(batch_cls_prob) + np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
-        scores[begin:end] = batch_scores
+        # batch_seg_prob = softmax(batch_seg_logits)[:,:,1] # BxN
+        # batch_seg_mask = np.argmax(batch_seg_logits, 2) # BxN
+        # mask_mean_prob = np.sum(batch_seg_prob * batch_seg_mask, 1) # B,
+        # mask_mean_prob = mask_mean_prob / np.sum(batch_seg_mask,1) # B,
+        # heading_prob = np.max(softmax(batch_heading_scores),1) # B
+        # size_prob = np.max(softmax(batch_size_scores),1) # B,
+        # batch_scores = np.log(batch_cls_prob) + np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
+        scores[begin:end] = np.log(batch_cls_prob)
         # Finished computing scores
 
     type_cls = np.argmax(logits, 1)
@@ -263,7 +273,6 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         for i in range(sample_num)])
 
     for i in range(sample_num):
-        # TODO: cal rotate angle
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
             heading_cls[i], heading_res[i],
             size_cls[i], size_res[i], rot_angle_list[i])
@@ -314,19 +323,6 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     end_points, sess2 = get_detection_network(detect_model_path)
     point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
     detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
-    # feed_dict = {\
-    #     end_points['pointclouds_pl']: point_clouds[:batch_size],
-    #     end_points['features_pl']: feature_vec[:batch_size],
-    #     end_points['is_training_pl']: False}
-    #
-    # batch_logits, batch_centers, \
-    # batch_heading_scores, batch_heading_residuals, \
-    # batch_size_scores, batch_size_residuals = \
-    #     sess2.run([end_points['cls_logits'], end_points['center'],
-    #         end_points['heading_scores'], end_points['heading_residuals'],
-    #         end_points['size_scores'], end_points['size_residuals']],
-    #         feed_dict=feed_dict)
-    # print(batch_logits)
 
 
 def main():
