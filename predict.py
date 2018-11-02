@@ -19,6 +19,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
 import frustum_pointnets_v2
 sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
+# sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
 
 class ProposalObject(object):
     def __init__(self, box_3d, score=0.0, type='Car', roi_features=None):
@@ -34,6 +35,21 @@ class ProposalObject(object):
 
 batch_size = 32 # for PointNet
 num_point = 512
+
+def rotate_pc_along_y(pc, rot_angle):
+    '''
+    Input:
+        pc: numpy array (N,C), first 3 channels are XYZ
+            z is facing forward, x is left ward, y is downward
+        rot_angle: rad scalar
+    Output:
+        pc: updated pc with XYZ rotated
+    '''
+    cosval = np.cos(rot_angle)
+    sinval = np.sin(rot_angle)
+    rotmat = np.array([[cosval, -sinval],[sinval, cosval]])
+    pc[:,[0,2]] = np.dot(pc[:,[0,2]], np.transpose(rotmat))
+    return pc
 
 def get_proposal_network(model_config, dataset, model_path, GPU_INDEX=0):
     with tf.Graph().as_default():
@@ -153,6 +169,7 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     # point cloud in proposals
     point_clouds = []
     features = []
+    rot_angle_list = []
     for box_3d, feat in zip(proposal_boxes_3d, roi_features):
         obj = ProposalObject(box_3d, 1, None, None)
         corners = compute_box_3d(obj)
@@ -161,13 +178,24 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
         if (np.any(inds) == False):
             # skip proposal with no points
             continue
-        # TODO: rotate to center
+        # under rect coorination, x->right, y->down, z->front
+        center_rect = (np.min(corners, axis=0) + np.max(corners, axis=0)) / 2
+        frustum_angle = -1 * np.arctan2(center_rect[2], center_rect[0])
+        # rotate to center
+        pc_rot = rotate_pc_along_y(pc[inds], np.pi/2.0 + frustum_angle)
+        rot_angle_list.append(frustum_angle)
         point_set = pc[inds]
         choice = np.random.choice(point_set.shape[0], num_point, replace=True)
         point_set = point_set[choice, :]
         point_clouds.append(point_set)
         features.append(feat)
-    return point_clouds, features
+        # import mayavi.mlab as mlab
+        # from viz_util import draw_lidar, draw_gt_boxes3d
+        # fig = draw_lidar(pc)
+        # fig = draw_gt_boxes3d([corners], fig, draw_text=False, color=(1, 1, 1))
+        # mlab.plot3d([0, center_rect[0]], [0, center_rect[1]], [0, center_rect[2]], color=(1,1,1), tube_radius=None, figure=fig)
+        # input()
+    return point_clouds, features, rot_angle_list
 
 def softmax(x):
     ''' Numpy function for softmax'''
@@ -175,6 +203,68 @@ def softmax(x):
     probs = np.exp(x - np.max(x, axis=len(shape)-1, keepdims=True))
     probs /= np.sum(probs, axis=len(shape)-1, keepdims=True)
     return probs
+
+def detect_batch(point_clouds, feature_vec, rot_angle_list):
+    sample_num = len(point_clouds)
+    logits = np.zeros((sample_num, NUM_CLASSES))
+    centers = np.zeros((sample_num, 3))
+    heading_logits = np.zeros((sample_num, NUM_HEADING_BIN))
+    heading_residuals = np.zeros((sample_num, NUM_HEADING_BIN))
+    size_logits = np.zeros((sample_num, NUM_SIZE_CLUSTER))
+    size_residuals = np.zeros((sample_num, NUM_SIZE_CLUSTER, 3))
+    scores = np.zeros((sample_num,)) # 3D box score
+    for i in range(math.floor(sample_num/batch_size)):
+        begin = i * batch_size
+        end = min((i + 1) * batch_size, sample_num)
+
+        feed_dict = {\
+            end_points['pointclouds_pl']: point_clouds[begin:end],
+            end_points['features_pl']: feature_vec[begin:end],
+            end_points['is_training_pl']: False}
+
+        batch_logits, batch_seg_logits, batch_centers, \
+        batch_heading_scores, batch_heading_residuals, \
+        batch_size_scores, batch_size_residuals = \
+            sess2.run([end_points['cls_logits'], end_points['mask_logits'], ['center'],
+                end_points['heading_scores'], end_points['heading_residuals'],
+                end_points['size_scores'], end_points['size_residuals']],
+                feed_dict=feed_dict)
+
+        logits[begin:end,...] = batch_logits
+        centers[begin:end,...] = batch_centers
+        heading_logits[begin:end,...] = batch_heading_scores
+        heading_residuals[begin:end,...] = batch_heading_residuals
+        size_logits[begin:end,...] = batch_size_scores
+        size_residuals[begin:end,...] = batch_size_residuals
+
+        # Compute scores
+        batch_cls_prob = np.max(softmax(batch_logits),1) # B,
+        batch_seg_prob = softmax(batch_seg_logits)[:,:,1] # BxN
+        batch_seg_mask = np.argmax(batch_seg_logits, 2) # BxN
+        mask_mean_prob = np.sum(batch_seg_prob * batch_seg_mask, 1) # B,
+        mask_mean_prob = mask_mean_prob / np.sum(batch_seg_mask,1) # B,
+        heading_prob = np.max(softmax(batch_heading_scores),1) # B
+        size_prob = np.max(softmax(batch_size_scores),1) # B,
+        batch_scores = np.log(batch_cls_prob) + np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
+        scores[begin:end] = batch_scores
+        # Finished computing scores
+
+    type_cls = np.argmax(logits, 1)
+    heading_cls = np.argmax(heading_logits, 1) # B
+    size_cls = np.argmax(size_logits, 1) # B
+    heading_res = np.array([heading_residuals[i,heading_cls[i]] \
+        for i in range(sample_num)])
+    size_res = np.vstack([size_residuals[i,size_cls[i],:] \
+        for i in range(sample_num)])
+
+    for i in range(sample_num):
+        # TODO: cal rotate angle
+        h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
+            heading_cls[i], heading_res[i],
+            size_cls[i], size_res[i], rot_angle_list[i])
+        obj_type = type_cls[i]
+        confidence = scores[i]
+        print(h,w,l,tx,ty,tz,ry,obj_type,confidence)
 
 def inference(rpn_model_path, detect_model_path, avod_config_path):
     model_config, _, eval_config, dataset_config = \
@@ -217,20 +307,21 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     '''
     # run frustum_pointnets_v2
     end_points, sess2 = get_detection_network(detect_model_path)
-    point_clouds, feature_vec = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
-    feed_dict = {\
-        end_points['pointclouds_pl']: point_clouds[:batch_size],
-        end_points['features_pl']: feature_vec[:batch_size],
-        end_points['is_training_pl']: False}
-
-    batch_logits, batch_centers, \
-    batch_heading_scores, batch_heading_residuals, \
-    batch_size_scores, batch_size_residuals = \
-        sess2.run([end_points['cls_logits'], end_points['center'],
-            end_points['heading_scores'], end_points['heading_residuals'],
-            end_points['size_scores'], end_points['size_residuals']],
-            feed_dict=feed_dict)
-    print(batch_logits)
+    point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
+    detect_batch(point_clouds, feature_vec, rot_angle_list)
+    # feed_dict = {\
+    #     end_points['pointclouds_pl']: point_clouds[:batch_size],
+    #     end_points['features_pl']: feature_vec[:batch_size],
+    #     end_points['is_training_pl']: False}
+    #
+    # batch_logits, batch_centers, \
+    # batch_heading_scores, batch_heading_residuals, \
+    # batch_size_scores, batch_size_residuals = \
+    #     sess2.run([end_points['cls_logits'], end_points['center'],
+    #         end_points['heading_scores'], end_points['heading_residuals'],
+    #         end_points['size_scores'], end_points['size_residuals']],
+    #         feed_dict=feed_dict)
+    # print(batch_logits)
 
 
 def main():
@@ -259,6 +350,25 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = args.device
     inference(args.rpn_model_path, args.detect_model_path, args.avod_config_path)
 
+def test():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--avod_config_path',
+                    type=str,
+                    dest='avod_config_path',
+                    required=True,
+                    help='avod_config_path')
+    args = parser.parse_args()
+    _, _, _, dataset_config = \
+    config_builder.get_configs_from_pipeline_file(
+        args.avod_config_path, is_training=False)
+    dataset = get_dataset(dataset_config, 'val')
+    kitti_samples = dataset.load_samples([0])
+
+    data_dump = pickle.load(open("rpn_out", "rb"))
+    proposals_and_scores = data_dump['proposals_and_scores']
+    roi_features = data_dump['roi_features']
+    kitti_samples = dataset.load_samples([0])
+    point_clouds, feature_vec = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
 
 if __name__ == '__main__':
     main()
