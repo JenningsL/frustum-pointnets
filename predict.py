@@ -314,6 +314,7 @@ def visualize(dataset, sample, prediction):
         obj.score = pred[7]
         # FIXME: this offset should be fixed in get_pointnet_input
         obj.t = rotate_pc_along_y(np.expand_dims(np.asarray(obj.t), 0), -np.pi/2)[0]
+        obj.ry -= np.pi/2
         vis_utils.draw_box_3d(pred_3d_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
                           show_orientation=False,
                           color_table=['r', 'y', 'r', 'w'],
