@@ -282,8 +282,8 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
 
     output = []
     for i in range(sample_num):
-        if type_cls[i] == 3:
-            # background
+        if type_cls[i] == 3 or scores[i] < 0.5:
+            # background or low confidence
             continue
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
             heading_cls[i], heading_res[i],
@@ -322,14 +322,12 @@ def visualize(dataset, sample, prediction):
         corners = compute_box_3d(obj)
         all_corners.append(corners)
     # 3d visualization
-    '''
-    import mayavi.mlab as mlab
-    from viz_util import draw_lidar, draw_gt_boxes3d
-    fig = draw_lidar(pc)
-    fig = draw_gt_boxes3d(all_corners, fig, draw_text=False, color=(1, 1, 1))
-    # mlab.plot3d([0, center_rect[0]], [0, center_rect[1]], [0, center_rect[2]], color=(1,1,1), tube_radius=None, figure=fig)
-    input()
-    '''
+    # import mayavi.mlab as mlab
+    # from viz_util import draw_lidar, draw_gt_boxes3d
+    # fig = draw_lidar(pc)
+    # fig = draw_gt_boxes3d(all_corners, fig, draw_text=False, color=(1, 1, 1))
+    # # mlab.plot3d([0, center_rect[0]], [0, center_rect[1]], [0, center_rect[2]], color=(1,1,1), tube_radius=None, figure=fig)
+    # input()
 
     # 2d visualization
     filename = 'final_out_viz/%s.png' % sample_name
@@ -356,7 +354,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     rpn_endpoints, sess1, rpn_model = get_proposal_network(model_config, dataset, rpn_model_path)
     end_points, sess2 = get_detection_network(detect_model_path)
 
-    for idx in range(1):
+    for idx in range(10):
         feed_dict1 = rpn_model.create_feed_dict()
         kitti_samples = dataset.load_samples([0])
         sample = kitti_samples[0]
@@ -374,7 +372,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         top_img_roi = np.reshape(top_img_roi, (roi_num, -1))
         top_bev_roi = np.reshape(top_bev_roi, (roi_num, -1))
         roi_features = np.column_stack((top_img_roi, top_bev_roi))
-
+        pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out/%s"%sample[constants.KEY_SAMPLE_NAME], "wb"))
         '''
         #pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out", "wb"))
         data_dump = pickle.load(open("rpn_out", "rb"))
@@ -448,13 +446,13 @@ def test():
     # fig = draw_gt_boxes3d(propsasl_corners[:1], fig, draw_text=False, color=(1, 1, 1))
     # input()
     ### end visualize rpn output
-    roi_features = rpn_out['roi_features']
-    point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores[:10], roi_features[:10])
-    fig = draw_lidar(np.concatenate(point_clouds))
-    fig = draw_gt_boxes3d(propsasl_corners[:10], fig, draw_text=False, color=(1, 1, 1))
-    input()
-    # prediction = pickle.load(open("001101", "rb"))
-    # visualize(dataset, sample, prediction)
+    # roi_features = rpn_out['roi_features']
+    # point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores[:10], roi_features[:10])
+    # fig = draw_lidar(np.concatenate(point_clouds))
+    # fig = draw_gt_boxes3d(propsasl_corners[:10], fig, draw_text=False, color=(1, 1, 1))
+    # input()
+    prediction = pickle.load(open("001101", "rb"))
+    visualize(dataset, sample, prediction)
 
 if __name__ == '__main__':
     main()
