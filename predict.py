@@ -192,6 +192,7 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
             continue
         # under rect coorination, x->right, y->down, z->front
         center_rect = (np.min(corners, axis=0) + np.max(corners, axis=0)) / 2
+        # FIXME: here induces a 90 degrees offset when visualize, should be fix together with prepare_data.py
         frustum_angle = -1 * np.arctan2(center_rect[2], center_rect[0])
         # rotate to center
         pc_rot = rotate_pc_along_y(pc[inds], np.pi/2.0 + frustum_angle)
@@ -257,7 +258,7 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         # mask_mean_prob = mask_mean_prob / np.sum(batch_seg_mask,1) # B,
         # heading_prob = np.max(softmax(batch_heading_scores),1) # B
         # size_prob = np.max(softmax(batch_size_scores),1) # B,
-        # batch_scores = np.log(batch_cls_prob) + np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
+        # batch_scores = batch_cls_prob + np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
         scores[begin:end] = batch_cls_prob
         # Finished computing scores
 
@@ -269,16 +270,25 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     size_res = np.vstack([size_residuals[i,size_cls[i],:] \
         for i in range(sample_num)])
 
-    # TODO: nms on output
     output = []
     for i in range(sample_num):
+        if type_cls[i] == 3:
+            # background
+            continue
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
             heading_cls[i], heading_res[i],
             size_cls[i], size_res[i], rot_angle_list[i])
         obj_type = type_cls[i]
         confidence = scores[i]
-        print(h,w,l,tx,ty,tz,ry,obj_type,confidence)
+        print(tx,ty,tz,l,w,h,ry,confidence,obj_type)
         output.append([tx,ty,tz,l,w,h,ry,confidence,obj_type])
+    # 2d nms on bev
+    bev_boxes = list(map(lambda p: [p[0] - p[3]/2, p[2] - p[5]/2, p[0] + p[3]/2, p[2] + p[5]/2, p[7]], output))
+    bev_boxes = np.array(bev_boxes)
+    print('fianl output before nms: {0}'.format(len(bev_boxes)))
+    nms_idxs = non_max_suppression(bev_boxes, 0.1)
+    print('fianl output after nms: {0}'.format(len(nms_idxs)))
+    output = [output[i] for i in nms_idxs]
     pickle.dump(output, open("final_out", "wb"))
     return output
 
@@ -291,18 +301,36 @@ def visualize(dataset, sample, prediction):
                                 display=False,
                                 fig_size=fig_size)
     type_names = ['Car', 'Pedestrian', 'Cyclist', 'Background']
+    pc = sample[constants.KEY_POINT_CLOUD].T
+    all_corners = []
     for pred in prediction:
-        obj = ProposalObject(pred[:7], pred[7], type_names[pred[8]])
-        obj.truncation = 0
-        obj.occlusion = 0
+        box = np.array(pred[0:7])
+        obj = box_3d_encoder.box_3d_to_object_label(box, obj_type=type_names[pred[8]])
+        obj.score = pred[7]
+        # FIXME: this offset should be fixed in get_pointnet_input
+        obj.t = rotate_pc_along_y(np.expand_dims(np.asarray(obj.t), 0), -np.pi/2)[0]
         vis_utils.draw_box_3d(pred_3d_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
                           show_orientation=False,
                           color_table=['r', 'y', 'r', 'w'],
                           line_width=2,
                           double_line=False)
+        corners = compute_box_3d(obj)
+        all_corners.append(corners)
+    # 3d visualization
+    '''
+    import mayavi.mlab as mlab
+    from viz_util import draw_lidar, draw_gt_boxes3d
+    fig = draw_lidar(pc)
+    fig = draw_gt_boxes3d(all_corners, fig, draw_text=False, color=(1, 1, 1))
+    # mlab.plot3d([0, center_rect[0]], [0, center_rect[1]], [0, center_rect[2]], color=(1,1,1), tube_radius=None, figure=fig)
+    input()
+    '''
+    # 2d visualization
     filename = sample_name + '.png'
     plt.savefig(filename)
     plt.close(pred_fig)
+    # plt.show()
+    # input()
 
 def inference(rpn_model_path, detect_model_path, avod_config_path):
     model_config, _, eval_config, dataset_config = \
