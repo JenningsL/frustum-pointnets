@@ -65,7 +65,7 @@ def get_proposal_network(model_config, dataset, model_path, GPU_INDEX=0):
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
             rpn_model = RpnModel(model_config,
-                         train_val_test=dataset.data_split,
+                         train_val_test='test',
                          dataset=dataset)
             rpn_pred = rpn_model.build()
             saver = tf.train.Saver()
@@ -164,6 +164,15 @@ def compute_box_3d(obj):
     corners_3d[2,:] = corners_3d[2,:] + obj.t[2];
     return corners_3d.T
 
+def nms_on_bev(boxes_3d, iou_threshold=0.1):
+    bev_boxes = list(map(lambda p: [p[0] - p[3]/2, p[2] - p[5]/2, p[0] + p[3]/2, p[2] + p[5]/2, p[7]], boxes_3d))
+    bev_boxes = np.array(bev_boxes)
+    print('fianl output before nms: {0}'.format(len(bev_boxes)))
+    nms_idxs = non_max_suppression(bev_boxes, iou_threshold)
+    print('fianl output after nms: {0}'.format(len(nms_idxs)))
+    # output = [output[i] for i in nms_idxs]
+    return nms_idxs
+
 def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_threshold=0.1):
     proposal_boxes_3d = proposals_and_scores[:, 0:7]
     proposal_scores = proposals_and_scores[:, 7]
@@ -197,7 +206,7 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
         # rotate to center
         pc_rot = rotate_pc_along_y(pc[inds], np.pi/2.0 + frustum_angle)
         rot_angle_list.append(frustum_angle)
-        point_set = pc[inds]
+        point_set = pc_rot
         choice = np.random.choice(point_set.shape[0], num_point, replace=True)
         point_set = point_set[choice, :]
         point_clouds.append(point_set)
@@ -284,11 +293,7 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         # print(tx,ty,tz,l,w,h,ry,confidence,obj_type)
         output.append([tx,ty,tz,l,w,h,ry,confidence,obj_type])
     # 2d nms on bev
-    bev_boxes = list(map(lambda p: [p[0] - p[3]/2, p[2] - p[5]/2, p[0] + p[3]/2, p[2] + p[5]/2, p[7]], output))
-    bev_boxes = np.array(bev_boxes)
-    print('fianl output before nms: {0}'.format(len(bev_boxes)))
-    nms_idxs = non_max_suppression(bev_boxes, 0.1)
-    print('fianl output after nms: {0}'.format(len(nms_idxs)))
+    nms_idxs = nms_on_bev(output, 0.1)
     output = [output[i] for i in nms_idxs]
     return output
 
@@ -325,6 +330,7 @@ def visualize(dataset, sample, prediction):
     # mlab.plot3d([0, center_rect[0]], [0, center_rect[1]], [0, center_rect[2]], color=(1,1,1), tube_radius=None, figure=fig)
     input()
     '''
+
     # 2d visualization
     filename = 'final_out_viz/%s.png' % sample_name
     plt.savefig(filename)
@@ -350,10 +356,11 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     rpn_endpoints, sess1, rpn_model = get_proposal_network(model_config, dataset, rpn_model_path)
     end_points, sess2 = get_detection_network(detect_model_path)
 
-    for idx in range(10):
+    for idx in range(1):
         feed_dict1 = rpn_model.create_feed_dict()
-        kitti_samples = dataset.load_samples([idx])
+        kitti_samples = dataset.load_samples([0])
         sample = kitti_samples[0]
+        print(sample[constants.KEY_SAMPLE_NAME])
         rpn_predictions = sess1.run(rpn_endpoints, feed_dict=feed_dict1)
         top_anchors = rpn_predictions[RpnModel.PRED_TOP_ANCHORS]
         top_proposals = box_3d_encoder.anchors_to_box_3d(top_anchors)
@@ -421,12 +428,33 @@ def test():
         args.avod_config_path, is_training=False)
     dataset = get_dataset(dataset_config, 'val')
     kitti_samples = dataset.load_samples([0])
+    sample = kitti_samples[0]
+    rpn_out = pickle.load(open("rpn_out", "rb"))
+    proposals_and_scores = rpn_out['proposals_and_scores']
+    ### start visualize rpn output
+    proposal_scores = proposals_and_scores[:, 7]
+    score_mask = proposal_scores > 0.1
+    # 3D box in the format [x, y, z, l, w, h, ry]
+    proposals_and_scores = proposals_and_scores[score_mask]
+    nms_idxs = nms_on_bev(proposals_and_scores, 0.1)
+    proposals_and_scores = proposals_and_scores[nms_idxs]
 
-    data_dump = pickle.load(open("rpn_out", "rb"))
-    proposals_and_scores = data_dump['proposals_and_scores']
-    roi_features = data_dump['roi_features']
-    kitti_samples = dataset.load_samples([0])
-    point_clouds, feature_vec = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
+    proposal_objs = list(map(lambda p: ProposalObject(p[:7], p[7], None, None), proposals_and_scores))
+    propsasl_corners = list(map(lambda obj: compute_box_3d(obj), proposal_objs))
+    pc = sample[constants.KEY_POINT_CLOUD].T
+    import mayavi.mlab as mlab
+    from viz_util import draw_lidar, draw_gt_boxes3d
+    # fig = draw_lidar(pc)
+    # fig = draw_gt_boxes3d(propsasl_corners[:1], fig, draw_text=False, color=(1, 1, 1))
+    # input()
+    ### end visualize rpn output
+    roi_features = rpn_out['roi_features']
+    point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores[:10], roi_features[:10])
+    fig = draw_lidar(np.concatenate(point_clouds))
+    fig = draw_gt_boxes3d(propsasl_corners[:10], fig, draw_text=False, color=(1, 1, 1))
+    input()
+    # prediction = pickle.load(open("001101", "rb"))
+    # visualize(dataset, sample, prediction)
 
 if __name__ == '__main__':
     main()
