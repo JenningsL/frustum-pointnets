@@ -65,7 +65,7 @@ def get_proposal_network(model_config, dataset, model_path, GPU_INDEX=0):
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
             rpn_model = RpnModel(model_config,
-                         train_val_test='test',
+                         train_val_test=dataset.data_split,
                          dataset=dataset)
             rpn_pred = rpn_model.build()
             saver = tf.train.Saver()
@@ -108,7 +108,7 @@ def get_dataset(dataset_config, data_split):
     if data_split == 'test':
         dataset_config.data_split_dir = 'testing'
 
-    dataset_config.has_labels = False
+    dataset_config.has_labels = data_split in ['train', 'val']
 
     # Remove augmentation during evaluation in test mode
     dataset_config.aug_list = []
@@ -252,14 +252,15 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
 
         # Compute scores
         batch_cls_prob = np.max(softmax(batch_logits),1) # B,
-        # batch_seg_prob = softmax(batch_seg_logits)[:,:,1] # BxN
-        # batch_seg_mask = np.argmax(batch_seg_logits, 2) # BxN
-        # mask_mean_prob = np.sum(batch_seg_prob * batch_seg_mask, 1) # B,
-        # mask_mean_prob = mask_mean_prob / np.sum(batch_seg_mask,1) # B,
-        # heading_prob = np.max(softmax(batch_heading_scores),1) # B
-        # size_prob = np.max(softmax(batch_size_scores),1) # B,
-        # batch_scores = batch_cls_prob + np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
-        scores[begin:end] = batch_cls_prob
+        batch_seg_prob = softmax(batch_seg_logits)[:,:,1] # BxN
+        batch_seg_mask = np.argmax(batch_seg_logits, 2) # BxN
+        mask_mean_prob = np.sum(batch_seg_prob * batch_seg_mask, 1) # B,
+        mask_mean_prob = mask_mean_prob / np.sum(batch_seg_mask,1) # B,
+        heading_prob = np.max(softmax(batch_heading_scores),1) # B
+        size_prob = np.max(softmax(batch_size_scores),1) # B,
+        batch_scores = (batch_cls_prob + mask_mean_prob + heading_prob + size_prob) / 4
+        # scores[begin:end] = batch_cls_prob
+        scores[begin:end] = batch_scores
         # Finished computing scores
 
     type_cls = np.argmax(logits, 1)
@@ -280,7 +281,7 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
             size_cls[i], size_res[i], rot_angle_list[i])
         obj_type = type_cls[i]
         confidence = scores[i]
-        print(tx,ty,tz,l,w,h,ry,confidence,obj_type)
+        # print(tx,ty,tz,l,w,h,ry,confidence,obj_type)
         output.append([tx,ty,tz,l,w,h,ry,confidence,obj_type])
     # 2d nms on bev
     bev_boxes = list(map(lambda p: [p[0] - p[3]/2, p[2] - p[5]/2, p[0] + p[3]/2, p[2] + p[5]/2, p[7]], output))
@@ -326,7 +327,7 @@ def visualize(dataset, sample, prediction):
     input()
     '''
     # 2d visualization
-    filename = sample_name + '.png'
+    filename = 'final_out_viz/%s.png' % sample_name
     plt.savefig(filename)
     plt.close(pred_fig)
     # plt.show()
@@ -345,40 +346,41 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     model_config.path_drop_probabilities = [1.0, 1.0]
 
     dataset = get_dataset(dataset_config, 'val')
-    '''
+
     # run avod proposal network
     rpn_endpoints, sess1, rpn_model = get_proposal_network(model_config, dataset, rpn_model_path)
-
-    feed_dict1 = rpn_model.create_feed_dict(sample_index=0)
-    kitti_samples = dataset.load_samples([0])
-    rpn_predictions = sess1.run(rpn_endpoints, feed_dict=feed_dict1)
-    top_anchors = rpn_predictions[RpnModel.PRED_TOP_ANCHORS]
-    top_proposals = box_3d_encoder.anchors_to_box_3d(top_anchors)
-    softmax_scores = rpn_predictions[RpnModel.PRED_TOP_OBJECTNESS_SOFTMAX]
-
-    proposals_and_scores = np.column_stack((top_proposals,
-                                            softmax_scores))
-    top_img_roi = rpn_predictions[RpnModel.PRED_TOP_IMG_ROI]
-    top_bev_roi = rpn_predictions[RpnModel.PRED_TOP_BEV_ROI]
-    print(top_img_roi.shape)
-    roi_num = len(top_img_roi)
-    top_img_roi = np.reshape(top_img_roi, (roi_num, -1))
-    top_bev_roi = np.reshape(top_bev_roi, (roi_num, -1))
-    roi_features = np.column_stack((top_img_roi, top_bev_roi))
-    '''
-    #pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out", "wb"))
-    data_dump = pickle.load(open("rpn_out", "rb"))
-    proposals_and_scores = data_dump['proposals_and_scores']
-    roi_features = data_dump['roi_features']
-    kitti_samples = dataset.load_samples([0])
-    # run frustum_pointnets_v2
-    '''
     end_points, sess2 = get_detection_network(detect_model_path)
-    point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
-    prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
-    '''
-    prediction = pickle.load(open('final_out', 'rb'))
-    visualize(dataset, kitti_samples[0], prediction)
+
+    for idx in range(10):
+        feed_dict1 = rpn_model.create_feed_dict()
+        kitti_samples = dataset.load_samples([idx])
+        sample = kitti_samples[0]
+        rpn_predictions = sess1.run(rpn_endpoints, feed_dict=feed_dict1)
+        top_anchors = rpn_predictions[RpnModel.PRED_TOP_ANCHORS]
+        top_proposals = box_3d_encoder.anchors_to_box_3d(top_anchors)
+        softmax_scores = rpn_predictions[RpnModel.PRED_TOP_OBJECTNESS_SOFTMAX]
+
+        proposals_and_scores = np.column_stack((top_proposals,
+                                                softmax_scores))
+        top_img_roi = rpn_predictions[RpnModel.PRED_TOP_IMG_ROI]
+        top_bev_roi = rpn_predictions[RpnModel.PRED_TOP_BEV_ROI]
+        roi_num = len(top_img_roi)
+        top_img_roi = np.reshape(top_img_roi, (roi_num, -1))
+        top_bev_roi = np.reshape(top_bev_roi, (roi_num, -1))
+        roi_features = np.column_stack((top_img_roi, top_bev_roi))
+
+        '''
+        #pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out", "wb"))
+        data_dump = pickle.load(open("rpn_out", "rb"))
+        proposals_and_scores = data_dump['proposals_and_scores']
+        roi_features = data_dump['roi_features']
+        kitti_samples = dataset.load_samples([0])
+        '''
+        # run frustum_pointnets_v2
+        point_clouds, feature_vec, rot_angle_list = get_pointnet_input(sample, proposals_and_scores, roi_features)
+        prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
+        prediction = pickle.load(open('final_out/%s' % sample[constants.KEY_SAMPLE_NAME], 'rb'))
+        visualize(dataset, sample, prediction)
 
 def main():
     parser = argparse.ArgumentParser()
