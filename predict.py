@@ -5,6 +5,7 @@ import argparse
 import numpy as np
 import pickle
 import math
+import time
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -354,11 +355,11 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     rpn_endpoints, sess1, rpn_model = get_proposal_network(model_config, dataset, rpn_model_path)
     end_points, sess2 = get_detection_network(detect_model_path)
 
-    for idx in range(10):
+    for idx in range(1000):
         feed_dict1 = rpn_model.create_feed_dict()
-        kitti_samples = dataset.load_samples([0])
+        kitti_samples = dataset.load_samples([idx])
         sample = kitti_samples[0]
-        print(sample[constants.KEY_SAMPLE_NAME])
+        start_time = time.time()
         rpn_predictions = sess1.run(rpn_endpoints, feed_dict=feed_dict1)
         top_anchors = rpn_predictions[RpnModel.PRED_TOP_ANCHORS]
         top_proposals = box_3d_encoder.anchors_to_box_3d(top_anchors)
@@ -372,7 +373,6 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         top_img_roi = np.reshape(top_img_roi, (roi_num, -1))
         top_bev_roi = np.reshape(top_bev_roi, (roi_num, -1))
         roi_features = np.column_stack((top_img_roi, top_bev_roi))
-        pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out/%s"%sample[constants.KEY_SAMPLE_NAME], "wb"))
         '''
         #pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out", "wb"))
         data_dump = pickle.load(open("rpn_out", "rb"))
@@ -383,6 +383,11 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         # run frustum_pointnets_v2
         point_clouds, feature_vec, rot_angle_list = get_pointnet_input(sample, proposals_and_scores, roi_features)
         prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
+
+        elapsed_time = time.time() - start_time
+        print(sample[constants.KEY_SAMPLE_NAME], elapsed_time)
+        # save result
+        pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out/%s"%sample[constants.KEY_SAMPLE_NAME], "wb"))
         pickle.dump(prediction, open('final_out/%s' % sample[constants.KEY_SAMPLE_NAME], 'wb'))
         visualize(dataset, sample, prediction)
 
