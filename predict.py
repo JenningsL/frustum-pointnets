@@ -5,6 +5,8 @@ import argparse
 import numpy as np
 import pickle
 import math
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from avod.core import box_3d_encoder
@@ -281,15 +283,18 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     return output
 
 def visualize(dataset, sample, prediction):
+    fig_size = (10, 6.1)
     sample_name = sample[constants.KEY_SAMPLE_NAME]
     pred_fig, pred_2d_axes, pred_3d_axes = \
         vis_utils.visualization(dataset.rgb_image_dir,
-                                sample_name,
+                                int(sample_name),
                                 display=False,
                                 fig_size=fig_size)
     type_names = ['Car', 'Pedestrian', 'Cyclist', 'Background']
     for pred in prediction:
         obj = ProposalObject(pred[:7], pred[7], type_names[pred[8]])
+        obj.truncation = 0
+        obj.occlusion = 0
         vis_utils.draw_box_3d(pred_3d_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
                           show_orientation=False,
                           color_table=['r', 'y', 'r', 'w'],
@@ -339,9 +344,12 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     roi_features = data_dump['roi_features']
     kitti_samples = dataset.load_samples([0])
     # run frustum_pointnets_v2
+    '''
     end_points, sess2 = get_detection_network(detect_model_path)
     point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
     prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
+    '''
+    prediction = pickle.load(open('final_out', 'rb'))
     visualize(dataset, kitti_samples[0], prediction)
 
 def main():
