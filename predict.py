@@ -5,6 +5,7 @@ import argparse
 import numpy as np
 import pickle
 import math
+import matplotlib.pyplot as plt
 
 from avod.core import box_3d_encoder
 from avod.core import evaluator_utils
@@ -15,6 +16,7 @@ from avod.core.models.rpn_model import RpnModel
 import avod.builders.config_builder_util as config_builder
 from avod.builders.dataset_builder import DatasetBuilder
 from wavedata.tools.core import calib_utils
+from wavedata.tools.visualization import vis_utils
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
@@ -254,7 +256,7 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         # heading_prob = np.max(softmax(batch_heading_scores),1) # B
         # size_prob = np.max(softmax(batch_size_scores),1) # B,
         # batch_scores = np.log(batch_cls_prob) + np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
-        scores[begin:end] = np.log(batch_cls_prob)
+        scores[begin:end] = batch_cls_prob
         # Finished computing scores
 
     type_cls = np.argmax(logits, 1)
@@ -274,8 +276,28 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         obj_type = type_cls[i]
         confidence = scores[i]
         print(h,w,l,tx,ty,tz,ry,obj_type,confidence)
-        output.append([h,w,l,tx,ty,tz,ry,obj_type,confidence])
+        output.append([tx,ty,tz,l,w,h,ry,confidence,obj_type])
     pickle.dump(output, open("final_out", "wb"))
+    return output
+
+def visualize(dataset, sample, prediction):
+    sample_name = sample[constants.KEY_SAMPLE_NAME]
+    pred_fig, pred_2d_axes, pred_3d_axes = \
+        vis_utils.visualization(dataset.rgb_image_dir,
+                                sample_name,
+                                display=False,
+                                fig_size=fig_size)
+    type_names = ['Car', 'Pedestrian', 'Cyclist', 'Background']
+    for pred in prediction:
+        obj = ProposalObject(pred[:7], pred[7], type_names[pred[8]])
+        vis_utils.draw_box_3d(pred_3d_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
+                          show_orientation=False,
+                          color_table=['r', 'y', 'r', 'w'],
+                          line_width=2,
+                          double_line=False)
+    filename = sample_name + '.png'
+    plt.savefig(filename)
+    plt.close(pred_fig)
 
 def inference(rpn_model_path, detect_model_path, avod_config_path):
     model_config, _, eval_config, dataset_config = \
@@ -319,8 +341,8 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     # run frustum_pointnets_v2
     end_points, sess2 = get_detection_network(detect_model_path)
     point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores, roi_features)
-    detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
-
+    prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
+    visualize(dataset, kitti_samples[0], prediction)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -347,6 +369,7 @@ def main():
     args = parser.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = args.device
     inference(args.rpn_model_path, args.detect_model_path, args.avod_config_path)
+
 
 def test():
     parser = argparse.ArgumentParser()
