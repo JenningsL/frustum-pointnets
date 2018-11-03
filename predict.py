@@ -290,7 +290,6 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     nms_idxs = non_max_suppression(bev_boxes, 0.1)
     print('fianl output after nms: {0}'.format(len(nms_idxs)))
     output = [output[i] for i in nms_idxs]
-    pickle.dump(output, open("final_out", "wb"))
     return output
 
 def visualize(dataset, sample, prediction):
@@ -379,7 +378,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         # run frustum_pointnets_v2
         point_clouds, feature_vec, rot_angle_list = get_pointnet_input(sample, proposals_and_scores, roi_features)
         prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
-        prediction = pickle.load(open('final_out/%s' % sample[constants.KEY_SAMPLE_NAME], 'rb'))
+        pickle.dump(prediction, open('final_out/%s' % sample[constants.KEY_SAMPLE_NAME], 'wb'))
         visualize(dataset, sample, prediction)
 
 def main():
