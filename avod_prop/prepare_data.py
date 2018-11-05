@@ -359,8 +359,9 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                     frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                         box2d_center_rect[0,0])
                 # Reject object without points
-                # if np.sum(label)==0:
-                #     continue
+                if np.sum(label)==0 and obj_type != 'NonObject':
+                    print('Reject object without points')
+                    continue
 
                 id_list.append(data_idx)
                 # box2d_list.append(np.array([xmin,ymin,xmax,ymax]))
@@ -510,7 +511,7 @@ if __name__=='__main__':
         extract_proposal_data(\
             os.path.join(BASE_DIR, 'image_sets/train.txt'),
             'training',
-            os.path.join(BASE_DIR, output_prefix+'train.pickle'),
+            os.path.join(BASE_DIR, output_prefix+'train_avod.pickle'),
             viz=False, perturb_box3d=True, augmentX=5,
             type_whitelist=type_whitelist,
             kitti_path=args.kitti_path, source=args.prop_source)
@@ -519,7 +520,7 @@ if __name__=='__main__':
         extract_proposal_data(\
             os.path.join(BASE_DIR, 'image_sets/val.txt'),
             'training',
-            os.path.join(BASE_DIR, output_prefix+'val.pickle'),
+            os.path.join(BASE_DIR, output_prefix+'val_avod.pickle'),
             viz=False, perturb_box3d=False, augmentX=1,
             type_whitelist=type_whitelist,
             kitti_path=args.kitti_path, source=args.prop_source)

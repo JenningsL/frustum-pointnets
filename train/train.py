@@ -33,6 +33,7 @@ parser.add_argument('--decay_step', type=int, default=200000, help='Decay step f
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
 parser.add_argument('--no_intensity', action='store_true', help='Only use XYZ for training')
 parser.add_argument('--restore_model_path', default=None, help='Restore model path e.g. log/model.ckpt [default: None]')
+parser.add_argument('--pickle', default='', help='pickle name')
 FLAGS = parser.parse_args()
 
 # Set training configurations
@@ -66,10 +67,10 @@ BN_DECAY_CLIP = 0.99
 
 # Load Frustum Datasets. Use default data paths.
 TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
-    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train.pickle',
+    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train%s.pickle'%FLAGS.pickle,
     rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=True)
 TEST_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='val',
-    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val.pickle',
+    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val%s.pickle'%FLAGS.pickle,
     rotate_to_center=True, extra_feature=True)
 
 def log_string(out_str):

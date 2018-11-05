@@ -16,7 +16,7 @@ from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER, NUM_OBJECT_POINT
 from model_util import point_cloud_masking, get_center_regression_net
 from model_util import placeholder_inputs, parse_output_to_tensors, get_loss
 
-def get_instance_seg_v2_net(point_cloud, feature_vec,
+def get_instance_seg_v2_net(point_cloud, feature_vec, cls_label,
                             is_training, bn_decay, end_points):
     ''' 3D instance segmentation PointNet v2 network.
     Input:
@@ -62,6 +62,7 @@ def get_instance_seg_v2_net(point_cloud, feature_vec,
 
     cls_label_pred = tf.argmax(tf.nn.softmax(end_points['cls_logits']), axis=1)
     end_points['one_hot_vec'] = tf.one_hot(cls_label_pred, 4)
+    #end_points['one_hot_vec'] = tf.one_hot(cls_label, 4)
     # Feature Propagation layers
     l3_points = tf.concat([l3_points, tf.expand_dims(end_points['one_hot_vec'], 1)], axis=2)
     l2_points = pointnet_fp_module(l2_xyz, l3_xyz, l2_points, l3_points,
@@ -150,7 +151,7 @@ def get_model(point_cloud, cls_label, feature_vec, is_training, bn_decay=None):
 
     # 3D Instance Segmentation PointNet
     logits, end_points = get_instance_seg_v2_net(\
-        point_cloud, feature_vec,
+        point_cloud, feature_vec, cls_label,
         is_training, bn_decay, end_points)
     end_points['mask_logits'] = logits
 
