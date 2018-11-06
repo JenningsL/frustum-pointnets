@@ -226,6 +226,8 @@ def train():
 
 def get_hard_negative_samples(sess, ops):
     is_training = True
+    train_idxs = np.arange(0, len(TRAIN_DATASET))
+    np.random.shuffle(train_idxs)
     num_batches = len(TRAIN_DATASET)/BATCH_SIZE
     hard_neg_idxs = []
     # test on training set
