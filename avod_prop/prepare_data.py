@@ -187,22 +187,35 @@ def find_match_label(prop_corners, labels_corners, iou_threshold=0.5):
     # print('largest_iou:', '<0.1' if largest_iou == 0.1 else largest_iou)
     return largest_idx, largest_iou
 
-def balance(type_idxs):
+def balance(type_idxs, pos_neg_ratio=1):
     '''
     keep non object sample equal to object sample
     '''
     non_obj_idxs = []
     keep_idxs = []
     for obj_type, idxs in type_idxs.items():
-        if obj_type == 'NonObject':
-            non_obj_idxs += idxs
-        else:
+        if not obj_type.startswith('Non'):
             keep_idxs += idxs
-    pos_sample_num = len(keep_idxs)
-    if len(non_obj_idxs) > pos_sample_num:
-        random.shuffle(non_obj_idxs)
-        type_idxs['NonObject'] = non_obj_idxs[:pos_sample_num]
-        keep_idxs += non_obj_idxs[:pos_sample_num]
+
+
+    if 'Car' in type_idxs:
+        keep_num = len(type_idxs['Car'])
+        random.shuffle(type_idxs['NonCar'])
+        keep_num = int(keep_num/pos_neg_ratio)
+        keep_idxs += type_idxs['NonCar'][:keep_num]
+        print('********Car negative samples: %d' % keep_num)
+
+    non_people_keep_num = 0
+    if 'Pedestrian' in type_idxs:
+        non_people_keep_num += len(type_idxs['Pedestrian'])
+    if 'Cyclist' in type_idxs:
+        non_people_keep_num += len(type_idxs['Cyclist'])
+    if non_people_keep_num > 0:
+        random.shuffle(type_idxs['NonPeople'])
+        non_people_keep_num = int(non_people_keep_num/pos_neg_ratio)
+        keep_idxs += type_idxs['NonPeople'][:non_people_keep_num]
+        print('********People negative samples: %d' % non_people_keep_num)
+
     return keep_idxs
 
 def print_statics(input_list, label_list, type_list, type_whitelist):
@@ -243,7 +256,7 @@ def get_proposal_from_label(label, calib, type_list):
 def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                        perturb_box3d=False, augmentX=1, type_whitelist=['Car'],
                        kitti_path=os.path.join(ROOT_DIR,'dataset/KITTI/object'),
-                       balance_pos_neg=True, source='label'):
+                       pos_neg_ratio=None, source='label'):
     ''' Extract point clouds and corresponding annotations in frustums
         defined generated from 2D bounding boxes
         Lidar points and 3d boxes are in *rect camera* coord system
@@ -276,7 +289,10 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
     box3d_size_list = [] # array of l,w,h
     frustum_angle_list = [] # angle of 2d box center from pos x-axis
     roi_feature_list = [] # feature map crop for proposal region
-    type_idxs = {key: [] for key in type_whitelist} # idxs of each type
+    # type_idxs = {key: [] for key in type_whitelist} # idxs of each type
+    type_idxs = {key: [] for key in type_whitelist[:3]} # idxs of each type
+    type_idxs['NonCar'] = []
+    type_idxs['NonPeople'] = []
 
     prop_idx = 0
     for data_idx in data_idx_list:
@@ -307,43 +323,79 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                 true_prop = get_proposal_from_label(obj, calib, type_whitelist)
                 proposals.append(true_prop)
 
-        proposals_in_frame = [] # all proposal boxes
+        pos_proposals_in_frame = []
+        neg_proposals_in_frame = []
         for prop_ in proposals:
-            for _ in range(augmentX):
-                prop = copy.deepcopy(prop_)
-                if perturb_box3d:
-                    prop = random_shift_box3d(prop)
-                prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
-                if prop_corners_image_2d is None:
-                    print('skip proposal behind camera')
-                    continue
+            prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
+            if prop_corners_image_2d is None:
+                print('skip proposal behind camera')
+                continue
 
-                prop_box_xy = prop_corners_3d[:4, [0,2]]
+            prop_box_xy = prop_corners_3d[:4, [0,2]]
+            # find corresponding label object
+            obj_idx, iou_with_gt = find_match_label(prop_box_xy, gt_boxes_xy)
+
+            if obj_idx == -1:
+                # non-object
+                obj_type = 'NonObject'
+                gt_box_3d = np.zeros((8, 3))
+                heading_angle = 0
+                box3d_size = np.zeros((1, 3))
+                frustum_angle = 0
+                neg_proposals_in_frame.append(prop_corners_3d)
+
                 # get points within proposal box
                 _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
                 pc_in_prop_box = pc_rect[prop_inds,:]
                 # shuffle points order
                 np.random.shuffle(pc_in_prop_box)
-                # segmentation label
                 label = np.zeros((pc_in_prop_box.shape[0]))
-                # find corresponding label object
-                obj_idx, iou_with_gt = find_match_label(prop_box_xy, gt_boxes_xy)
-                if obj_idx != -1:
-                    proposals_in_frame.append(prop_corners_3d)
-                if obj_idx == -1:
-                    # non-object
-                    obj_type = 'NonObject'
-                    gt_box_3d = np.zeros((8, 3))
-                    heading_angle = 0
-                    box3d_size = np.zeros((1, 3))
-                    frustum_angle = 0
+
+                id_list.append(data_idx)
+                # box2d_list.append(np.array([xmin,ymin,xmax,ymax]))
+                box3d_list.append(gt_box_3d)
+                input_list.append(pc_in_prop_box)
+                label_list.append(label)
+                type_list.append(obj_type)
+                heading_list.append(heading_angle)
+                box3d_size_list.append(box3d_size)
+                frustum_angle_list.append(frustum_angle)
+                roi_feature_list.append(prop_.roi_features)
+                # type_idxs[obj_type].append(prop_idx)
+                if prop_.l > 2 or prop_.w > 2:
+                    type_idxs['NonCar'].append(prop_idx)
                 else:
+                    type_idxs['NonPeople'].append(prop_idx)
+                prop_idx += 1
+            else:
+                # only do augmentation on objects
+                for _ in range(augmentX):
+                    prop = copy.deepcopy(prop_)
+                    if perturb_box3d:
+                        prop = random_shift_box3d(prop)
+                    prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+                    if prop_corners_image_2d is None:
+                        print('skip proposal behind camera')
+                        continue
+                    # get points within proposal box
+                    _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+                    pc_in_prop_box = pc_rect[prop_inds,:]
+                    # shuffle points order
+                    np.random.shuffle(pc_in_prop_box)
+                    # segmentation label
+                    label = np.zeros((pc_in_prop_box.shape[0]))
+
                     obj = objects[obj_idx]
                     obj_type = obj.type
                     gt_box_3d = gt_boxes_3d[obj_idx]
 
                     _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
                     label[inds] = 1
+                    # Reject object without points
+                    if np.sum(label)==0:
+                        print('Reject object without points')
+                        continue
+                    pos_proposals_in_frame.append(prop_corners_3d)
                     # Get 3D BOX heading
                     heading_angle = obj.ry
                     # Get 3D BOX size
@@ -358,62 +410,56 @@ def extract_proposal_data(idx_filename, split, output_filename, viz=False,
                     box2d_center_rect = calib.project_image_to_rect(uvdepth)
                     frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                         box2d_center_rect[0,0])
-                # Reject object without points
-                if np.sum(label)==0 and obj_type != 'NonObject':
-                    print('Reject object without points')
-                    continue
 
-                id_list.append(data_idx)
-                # box2d_list.append(np.array([xmin,ymin,xmax,ymax]))
-                box3d_list.append(gt_box_3d)
-                input_list.append(pc_in_prop_box)
-                label_list.append(label)
-                type_list.append(obj_type)
-                heading_list.append(heading_angle)
-                box3d_size_list.append(box3d_size)
-                frustum_angle_list.append(frustum_angle)
-                roi_feature_list.append(prop.roi_features)
-                type_idxs[obj_type].append(prop_idx)
-                prop_idx += 1
-                # visualize one proposal
-                if viz and False:
-                    import mayavi.mlab as mlab
-                    from viz_util import draw_lidar, draw_gt_boxes3d
-                    # if obj_type != 'NonObject':
-                    # if obj_type != 'Pedestrian':
-                    if obj_type == 'NonObject':
-                        continue
-                    fig = draw_lidar(pc_rect)
-                    fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
-                    fig = draw_gt_boxes3d([prop_corners_3d], fig, draw_text=False, color=(1, 1, 1))
-                    # roi_feature_map
-                    roi_features_size = 7 * 7 * 32
-                    img_roi_features = prop.roi_features[0:roi_features_size].reshape((7, 7, -1))
-                    bev_roi_features = prop.roi_features[roi_features_size:].reshape((7, 7, -1))
-                    img_roi_features = np.amax(img_roi_features, axis=-1)
-                    bev_roi_features = np.amax(bev_roi_features, axis=-1)
-                    fig1 = mlab.figure(figure=None, bgcolor=(0,0,0),
-                        fgcolor=None, engine=None, size=(500, 500))
-                    fig2 = mlab.figure(figure=None, bgcolor=(0,0,0),
-                        fgcolor=None, engine=None, size=(500, 500))
-                    mlab.imshow(img_roi_features, colormap='gist_earth', name='img_roi_features', figure=fig1)
-                    mlab.imshow(bev_roi_features, colormap='gist_earth', name='bev_roi_features', figure=fig2)
-                    # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
-                    raw_input()
+                    id_list.append(data_idx)
+                    # box2d_list.append(np.array([xmin,ymin,xmax,ymax]))
+                    box3d_list.append(gt_box_3d)
+                    input_list.append(pc_in_prop_box)
+                    label_list.append(label)
+                    type_list.append(obj_type)
+                    heading_list.append(heading_angle)
+                    box3d_size_list.append(box3d_size)
+                    frustum_angle_list.append(frustum_angle)
+                    roi_feature_list.append(prop.roi_features)
+                    type_idxs[obj_type].append(prop_idx)
+                    prop_idx += 1
+                    # visualize one proposal
+                    if viz and False:
+                        import mayavi.mlab as mlab
+                        from viz_util import draw_lidar, draw_gt_boxes3d
+                        fig = draw_lidar(pc_rect)
+                        fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
+                        fig = draw_gt_boxes3d([prop_corners_3d], fig, draw_text=False, color=(1, 1, 1))
+                        # roi_feature_map
+                        roi_features_size = 7 * 7 * 32
+                        img_roi_features = prop.roi_features[0:roi_features_size].reshape((7, 7, -1))
+                        bev_roi_features = prop.roi_features[roi_features_size:].reshape((7, 7, -1))
+                        img_roi_features = np.amax(img_roi_features, axis=-1)
+                        bev_roi_features = np.amax(bev_roi_features, axis=-1)
+                        fig1 = mlab.figure(figure=None, bgcolor=(0,0,0),
+                            fgcolor=None, engine=None, size=(500, 500))
+                        fig2 = mlab.figure(figure=None, bgcolor=(0,0,0),
+                            fgcolor=None, engine=None, size=(500, 500))
+                        mlab.imshow(img_roi_features, colormap='gist_earth', name='img_roi_features', figure=fig1)
+                        mlab.imshow(bev_roi_features, colormap='gist_earth', name='bev_roi_features', figure=fig2)
+                        # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
+                        raw_input()
 
-        print('%d augmented proposal in frame %d' % (len(proposals_in_frame), data_idx))
+        print('%d positive proposal in frame %d' % (len(pos_proposals_in_frame), data_idx))
+        print('%d negative proposal in frame %d' % (len(neg_proposals_in_frame), data_idx))
         # draw all proposal in frame
         if viz:
             import mayavi.mlab as mlab
             from viz_util import draw_lidar, draw_gt_boxes3d
             fig = draw_lidar(pc_rect)
-            fig = draw_gt_boxes3d(gt_boxes_3d, fig, color=(1, 0, 0))
-            fig = draw_gt_boxes3d(proposals_in_frame, fig, draw_text=False, color=(1, 1, 1))
+            fig = draw_gt_boxes3d(gt_boxes_3d, fig, color=(1, 1, 1))
+            fig = draw_gt_boxes3d(pos_proposals_in_frame, fig, draw_text=False, color=(1, 0, 0))
+            fig = draw_gt_boxes3d(neg_proposals_in_frame, fig, draw_text=False, color=(0, 1, 0))
             raw_input()
 
 
-    if balance_pos_neg:
-        keep_idxs = balance(type_idxs)
+    if pos_neg_ratio is not None:
+        keep_idxs = balance(type_idxs, pos_neg_ratio)
     else:
         keep_idxs = [idx for sublist in type_idxs.values() for idx in sublist]
     random.shuffle(keep_idxs)
@@ -512,9 +558,9 @@ if __name__=='__main__':
             os.path.join(BASE_DIR, 'image_sets/train.txt'),
             'training',
             os.path.join(BASE_DIR, output_prefix+'train_avod.pickle'),
-            viz=False, perturb_box3d=True, augmentX=5,
+            viz=False, perturb_box3d=True, augmentX=3,
             type_whitelist=type_whitelist,
-            kitti_path=args.kitti_path, source=args.prop_source)
+            kitti_path=args.kitti_path, pos_neg_ratio=0.5, source=args.prop_source)
 
     if args.gen_val:
         extract_proposal_data(\
@@ -523,4 +569,4 @@ if __name__=='__main__':
             os.path.join(BASE_DIR, output_prefix+'val_avod.pickle'),
             viz=False, perturb_box3d=False, augmentX=1,
             type_whitelist=type_whitelist,
-            kitti_path=args.kitti_path, source=args.prop_source)
+            kitti_path=args.kitti_path, pos_neg_ratio=1, source=args.prop_source)
