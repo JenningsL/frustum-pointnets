@@ -212,7 +212,7 @@ def train():
             sys.stdout.flush()
 
             if FLAGS.hard_sample_mining:
-                hard_neg_idxs = get_hard_negative_samples(sess, ops, train_writer)
+                hard_neg_idxs = get_hard_negative_samples(sess, ops)
                 train_one_epoch(sess, ops, train_writer, hard_neg_idxs)
             else:
                 train_one_epoch(sess, ops, train_writer)
