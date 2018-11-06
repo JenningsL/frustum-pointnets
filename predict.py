@@ -236,6 +236,7 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     size_logits = np.zeros((sample_num, NUM_SIZE_CLUSTER))
     size_residuals = np.zeros((sample_num, NUM_SIZE_CLUSTER, 3))
     scores = np.zeros((sample_num,)) # 3D box score
+    points_num = np.zeros((sample_num,))
     for i in range(math.floor(sample_num/batch_size)):
         begin = i * batch_size
         end = min((i + 1) * batch_size, sample_num)
@@ -259,6 +260,7 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         heading_residuals[begin:end,...] = batch_heading_residuals
         size_logits[begin:end,...] = batch_size_scores
         size_residuals[begin:end,...] = batch_size_residuals
+        points_num[begin:end,...] = np.sum(np.equal(np.argmax(batch_seg_logits, 2), 1), axis=1)
 
         # Compute scores
         batch_cls_prob = np.max(softmax(batch_logits),1) # B,
@@ -283,8 +285,8 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
 
     output = []
     for i in range(sample_num):
-        if type_cls[i] == 3 or scores[i] < 0.5:
-            # background or low confidence
+        if type_cls[i] == 3 or scores[i] < 0.5 or points_num[i] == 0:
+            # background or low confidence or no object point
             continue
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
             heading_cls[i], heading_res[i],
@@ -294,7 +296,7 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         # print(tx,ty,tz,l,w,h,ry,confidence,obj_type)
         output.append([tx,ty,tz,l,w,h,ry,confidence,obj_type])
     # 2d nms on bev
-    nms_idxs = nms_on_bev(output, 0.1)
+    nms_idxs = nms_on_bev(output, 0.01)
     output = [output[i] for i in nms_idxs]
     return output
 
