@@ -33,6 +33,7 @@ parser.add_argument('--decay_step', type=int, default=200000, help='Decay step f
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
 parser.add_argument('--no_intensity', action='store_true', help='Only use XYZ for training')
 parser.add_argument('--restore_model_path', default=None, help='Restore model path e.g. log/model.ckpt [default: None]')
+parser.add_argument('--hard_sample_mining', default=False, help='If train only with classification hard samples')
 parser.add_argument('--pickle', default='', help='pickle name')
 FLAGS = parser.parse_args()
 
@@ -210,7 +211,11 @@ def train():
             log_string('**** EPOCH %03d ****' % (epoch))
             sys.stdout.flush()
 
-            train_one_epoch(sess, ops, train_writer)
+            if FLAGS.hard_sample_mining:
+                hard_neg_idxs = get_hard_negative_samples(sess, ops, train_writer)
+                train_one_epoch(sess, ops, train_writer, hard_neg_idxs)
+            else:
+                train_one_epoch(sess, ops, train_writer)
             val_loss = eval_one_epoch(sess, ops, test_writer)
 
             # Save the variables to disk.
@@ -219,7 +224,37 @@ def train():
                 save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
                 log_string("Model saved in file: {0}, val_loss: {1}".format(save_path, val_loss))
 
-def train_one_epoch(sess, ops, train_writer):
+def get_hard_negative_samples(sess, ops):
+    is_training = True
+    num_batches = len(TRAIN_DATASET)/BATCH_SIZE
+    hard_neg_idxs = []
+    # test on training set
+    for batch_idx in range(num_batches):
+        start_idx = batch_idx * BATCH_SIZE
+        end_idx = (batch_idx+1) * BATCH_SIZE
+
+        batch_data, batch_cls_label, batch_label, batch_center, \
+        batch_hclass, batch_hres, \
+        batch_sclass, batch_sres, \
+        batch_rot_angle, batch_feature_vec = \
+            get_batch(TRAIN_DATASET, train_idxs, start_idx, end_idx,
+                NUM_POINT, NUM_CHANNEL)
+
+        feed_dict = {ops['pointclouds_pl']: batch_data,
+                     ops['features_pl']: batch_feature_vec,
+                     ops['cls_label_pl']: batch_cls_label,
+                     ops['is_training_pl']: is_training,}
+        cls_logits_val = sess.run(ops['cls_logits'], feed_dict=feed_dict)
+        cls_preds_val = np.argmax(cls_logits_val, 1)
+        incorrect = cls_preds_val != batch_cls_label
+        false_positive = np.logical_and(incorrect, batch_cls_label == 3)
+        for i, sample_idx in enumerate(range(start_idx, end_idx)):
+            if false_positive[i]:
+                hard_neg_idxs.append(sample_idx)
+    log_string("Find {0} hard negative samples".format(len(hard_neg_idxs)))
+    return hard_neg_idxs
+
+def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
     ''' Training for one epoch on the frustum dataset.
     ops is dict mapping from string to tf ops
     '''
@@ -227,9 +262,13 @@ def train_one_epoch(sess, ops, train_writer):
     log_string(str(datetime.now()))
 
     # Shuffle train samples
-    train_idxs = np.arange(0, len(TRAIN_DATASET))
+    if not idxs_to_use:
+        train_idxs = np.arange(0, len(TRAIN_DATASET))
+    else:
+        log_string('Training with classification hard samples.')
+        train_idxs = idxs_to_use
     np.random.shuffle(train_idxs)
-    num_batches = len(TRAIN_DATASET)/BATCH_SIZE
+    num_batches = len(train_idxs)/BATCH_SIZE
 
     # To collect statistics
     total_cls_correct = 0
