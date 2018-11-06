@@ -9,6 +9,7 @@ import time
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as patheffects
 
 from avod.core import box_3d_encoder
 from avod.core import evaluator_utils
@@ -18,6 +19,7 @@ from avod.core import constants
 from avod.core.models.rpn_model import RpnModel
 import avod.builders.config_builder_util as config_builder
 from avod.builders.dataset_builder import DatasetBuilder
+from avod.core import box_3d_projector
 from wavedata.tools.core import calib_utils
 from wavedata.tools.visualization import vis_utils
 
@@ -301,6 +303,11 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     return output
 
 def visualize(dataset, sample, prediction):
+    BOX_COLOUR_SCHEME = {
+        'Car': '#00FF00',           # Green
+        'Pedestrian': '#00FFFF',    # Teal
+        'Cyclist': '#FFFF00'        # Yellow
+    }
     fig_size = (10, 6.1)
     sample_name = sample[constants.KEY_SAMPLE_NAME]
     pred_fig, pred_2d_axes, pred_3d_axes = \
@@ -315,6 +322,7 @@ def visualize(dataset, sample, prediction):
         box = np.array(pred[0:7])
         obj = box_3d_encoder.box_3d_to_object_label(box, obj_type=type_names[pred[8]])
         obj.score = pred[7]
+
         # FIXME: this offset should be fixed in get_pointnet_input
         obj.t = rotate_pc_along_y(np.expand_dims(np.asarray(obj.t), 0), -np.pi/2)[0]
         obj.ry -= np.pi/2
@@ -325,6 +333,26 @@ def visualize(dataset, sample, prediction):
                           double_line=False)
         corners = compute_box_3d(obj)
         all_corners.append(corners)
+
+        # draw text info
+        projected = calib_utils.project_to_image(corners.T, sample[constants.KEY_STEREO_CALIB_P2])
+        x1 = np.amin(projected[0])
+        y1 = np.amin(projected[1])
+        x2 = np.amax(projected[0])
+        y2 = np.amax(projected[1])
+        text_x = (x1 + x2) / 2
+        text_y = y1
+        text = "{}\n{:.2f}".format(obj.type, obj.score)
+        pred_3d_axes.text(text_x, text_y - 4,
+            text,
+            verticalalignment='bottom',
+            horizontalalignment='center',
+            color=BOX_COLOUR_SCHEME[obj.type],
+            fontsize=10,
+            fontweight='bold',
+            path_effects=[
+                patheffects.withStroke(linewidth=2,
+                                       foreground='black')])
     # 3d visualization
     # import mayavi.mlab as mlab
     # from viz_util import draw_lidar, draw_gt_boxes3d
@@ -382,6 +410,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         proposals_and_scores = data_dump['proposals_and_scores']
         roi_features = data_dump['roi_features']
         kitti_samples = dataset.load_samples([0])
+        sample = kitti_samples[0]
         '''
         # run frustum_pointnets_v2
         point_clouds, feature_vec, rot_angle_list = get_pointnet_input(sample, proposals_and_scores, roi_features)
@@ -433,34 +462,12 @@ def test():
     config_builder.get_configs_from_pipeline_file(
         args.avod_config_path, is_training=False)
     dataset = get_dataset(dataset_config, 'val')
-    kitti_samples = dataset.load_samples([0])
-    sample = kitti_samples[0]
-    rpn_out = pickle.load(open("rpn_out", "rb"))
-    proposals_and_scores = rpn_out['proposals_and_scores']
-    ### start visualize rpn output
-    proposal_scores = proposals_and_scores[:, 7]
-    score_mask = proposal_scores > 0.1
-    # 3D box in the format [x, y, z, l, w, h, ry]
-    proposals_and_scores = proposals_and_scores[score_mask]
-    nms_idxs = nms_on_bev(proposals_and_scores, 0.1)
-    proposals_and_scores = proposals_and_scores[nms_idxs]
-
-    proposal_objs = list(map(lambda p: ProposalObject(p[:7], p[7], None, None), proposals_and_scores))
-    propsasl_corners = list(map(lambda obj: compute_box_3d(obj), proposal_objs))
-    pc = sample[constants.KEY_POINT_CLOUD].T
-    import mayavi.mlab as mlab
-    from viz_util import draw_lidar, draw_gt_boxes3d
-    # fig = draw_lidar(pc)
-    # fig = draw_gt_boxes3d(propsasl_corners[:1], fig, draw_text=False, color=(1, 1, 1))
-    # input()
-    ### end visualize rpn output
-    # roi_features = rpn_out['roi_features']
-    # point_clouds, feature_vec, rot_angle_list = get_pointnet_input(kitti_samples[0], proposals_and_scores[:10], roi_features[:10])
-    # fig = draw_lidar(np.concatenate(point_clouds))
-    # fig = draw_gt_boxes3d(propsasl_corners[:10], fig, draw_text=False, color=(1, 1, 1))
-    # input()
-    prediction = pickle.load(open("001101", "rb"))
-    visualize(dataset, sample, prediction)
+    for idx in range(100):
+        kitti_samples = dataset.load_samples([idx])
+        sample = kitti_samples[0]
+        rpn_out = pickle.load(open("rpn_out/%s" % sample[constants.KEY_SAMPLE_NAME], "rb"))
+        prediction = pickle.load(open("final_out/%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
+        visualize(dataset, sample, prediction)
 
 if __name__ == '__main__':
     main()
