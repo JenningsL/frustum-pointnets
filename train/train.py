@@ -102,6 +102,7 @@ def get_bn_decay(batch):
 def train():
     ''' Main function for training and simple evaluation. '''
     best_val_loss = float('inf')
+    best_avg_cls_acc = 0
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
             pointclouds_pl, features_pl, cls_labels_pl, labels_pl, centers_pl, \
@@ -212,19 +213,28 @@ def train():
             sys.stdout.flush()
 
             if FLAGS.hard_sample_mining:
-                hard_neg_idxs = get_hard_negative_samples(sess, ops)
+                if FLAGS.restore_model_path is None:
+                    raise Exception('must provide restore_model_path with hard_sample_mining')
+                if epoch == 0:
+                    _, best_avg_cls_acc = eval_one_epoch(sess, ops, test_writer)
+                hard_neg_idxs = get_hard_samples(sess, ops)
                 train_one_epoch(sess, ops, train_writer, hard_neg_idxs)
+                val_loss, avg_cls_acc = eval_one_epoch(sess, ops, test_writer)
+                # Save the variables to disk.
+                if avg_cls_acc > best_avg_cls_acc:
+                    best_avg_cls_acc = avg_cls_acc
+                    save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
+                    log_string("Model saved in file: {0}, avg_cls_acc: {1}".format(save_path, avg_cls_acc))
             else:
                 train_one_epoch(sess, ops, train_writer)
-            val_loss = eval_one_epoch(sess, ops, test_writer)
+                val_loss, avg_cls_acc = eval_one_epoch(sess, ops, test_writer)
+                # Save the variables to disk.
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
+                    log_string("Model saved in file: {0}, val_loss: {1}".format(save_path, val_loss))
 
-            # Save the variables to disk.
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
-                log_string("Model saved in file: {0}, val_loss: {1}".format(save_path, val_loss))
-
-def get_hard_negative_samples(sess, ops):
+def get_hard_samples(sess, ops):
     is_training = True
     train_idxs = np.arange(0, len(TRAIN_DATASET))
     np.random.shuffle(train_idxs)
@@ -251,7 +261,8 @@ def get_hard_negative_samples(sess, ops):
         incorrect = cls_preds_val != batch_cls_label
         false_positive = np.logical_and(incorrect, batch_cls_label == 3)
         for i, sample_idx in enumerate(range(start_idx, end_idx)):
-            if false_positive[i]:
+            # if false_positive[i]:
+            if incorrect[i]:
                 hard_neg_idxs.append(sample_idx)
     log_string("Find {0} hard negative samples".format(len(hard_neg_idxs)))
     return hard_neg_idxs
@@ -452,9 +463,9 @@ def eval_one_epoch(sess, ops, test_writer):
         (total_cls_correct / float(total_cls_seen)))
     log_string('eval segmentation accuracy: %f'% \
         (total_correct / float(total_seen)))
-    log_string('eval classification avg class acc: %f' % \
-        (np.mean(np.array(total_correct_class) / \
-            np.array(total_seen_class,dtype=np.float))))
+    avg_cls_acc = np.mean(np.array(total_correct_class) / \
+        np.array(total_seen_class,dtype=np.float))
+    log_string('eval classification avg class acc: %f' % avg_cls_acc)
     log_string('eval box IoU (ground/3D): %f / %f' % \
         (iou2ds_sum / float(total_obj_sample), iou3ds_sum / \
             float(total_obj_sample)))
@@ -463,7 +474,7 @@ def eval_one_epoch(sess, ops, test_writer):
     box_estimation_acc = float(iou3d_correct_cnt)/float(total_obj_sample)
     mean_loss = loss_sum / float(num_batches)
     EPOCH_CNT += 1
-    return mean_loss
+    return mean_loss, avg_cls_acc
 
 
 if __name__ == "__main__":
