@@ -25,7 +25,7 @@ from wavedata.tools.visualization import vis_utils
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
-import frustum_pointnets_v2
+# import frustum_pointnets_v2
 sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
 from kitti_object_avod import non_max_suppression
 # sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
@@ -291,6 +291,10 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
             heading_cls[i], heading_res[i],
             size_cls[i], size_res[i], rot_angle_list[i])
+        # FIXME: this offset should be fixed in get_pointnet_input
+        tx, ty, yz = rotate_pc_along_y(np.expand_dims(np.asarray([tx,ty,tz]), 0), -np.pi/2)[0]
+        ry -= np.pi/2
+
         obj_type = type_cls[i]
         confidence = scores[i]
         # print(tx,ty,tz,l,w,h,ry,confidence,obj_type)
@@ -298,7 +302,18 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     # 2d nms on bev
     nms_idxs = nms_on_bev(output, 0.1)
     output = [output[i] for i in nms_idxs]
-    return output
+    # raw output after nms
+    raw_output = {
+        'type_list': type_cls[nms_idxs],
+        'center_list': centers[nms_idxs],
+        'heading_cls_list': heading_cls[nms_idxs],
+        'heading_res_list': heading_res[nms_idxs],
+        'size_cls_list': size_cls[nms_idxs],
+        'size_res_list': size_res[nms_idxs],
+        'rot_angle_list': rot_angle_list[nms_idxs],
+        'score_list': scores[nms_idxs]
+    }
+    return output, raw_output
 
 def visualize(dataset, sample, prediction):
     BOX_COLOUR_SCHEME = {
@@ -321,9 +336,6 @@ def visualize(dataset, sample, prediction):
         obj = box_3d_encoder.box_3d_to_object_label(box, obj_type=type_names[pred[8]])
         obj.score = pred[7]
 
-        # FIXME: this offset should be fixed in get_pointnet_input
-        obj.t = rotate_pc_along_y(np.expand_dims(np.asarray(obj.t), 0), -np.pi/2)[0]
-        obj.ry -= np.pi/2
         vis_utils.draw_box_3d(pred_3d_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
                           show_orientation=False,
                           color_table=['r', 'y', 'r', 'w'],
@@ -384,6 +396,8 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
     rpn_endpoints, sess1, rpn_model = get_proposal_network(model_config, dataset, rpn_model_path)
     end_points, sess2 = get_detection_network(detect_model_path)
 
+    all_prediction = []
+    all_id_list = None
     for idx in range(1000):
         feed_dict1 = rpn_model.create_feed_dict()
         kitti_samples = dataset.load_samples([idx])
@@ -416,10 +430,42 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
 
         elapsed_time = time.time() - start_time
         print(sample[constants.KEY_SAMPLE_NAME], elapsed_time)
+        # concat all predictions for kitti eval
+        id_list = np.ones((len(prediction),)) * int(sample[constants.KEY_SAMPLE_NAME])
+        if all_id_list is None:
+            all_id_list = np.concatenate(all_id_list, id_list)
+        all_prediction += prediction
         # save result
         pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out/%s"%sample[constants.KEY_SAMPLE_NAME], "wb"))
         pickle.dump(prediction, open('final_out/%s' % sample[constants.KEY_SAMPLE_NAME], 'wb'))
         visualize(dataset, sample, prediction)
+    # for kitti eval
+    write_detection_results('./detection_results', all_prediction, all_id_list)
+
+def write_detection_results(result_dir, predictions, id_list):
+    ''' Write frustum pointnets results to KITTI format label files. '''
+    if result_dir is None: return
+    results = {} # map from idx to list of strings, each string is a line (without \n)
+    for i in range(len(predictions)):
+        idx = id_list[i]
+        output_str = type_list[i] + " -1 -1 -10 "
+        box2d = [0.0, 0.0, 1.0, 1.0] # fake 2d box
+        output_str += "%f %f %f %f " % (box2d[0],box2d[1],box2d[2],box2d[3])
+        h,w,l,tx,ty,tz,ry,score = predictions
+        output_str += "%f %f %f %f %f %f %f %f" % (h,w,l,tx,ty,tz,ry,score)
+        if idx not in results: results[idx] = []
+        results[idx].append(output_str)
+
+    # Write TXT files
+    if not os.path.exists(result_dir): os.mkdir(result_dir)
+    output_dir = os.path.join(result_dir, 'data')
+    if not os.path.exists(output_dir): os.mkdir(output_dir)
+    for idx in results:
+        pred_filename = os.path.join(output_dir, '%06d.txt'%(idx))
+        fout = open(pred_filename, 'w')
+        for line in results[idx]:
+            fout.write(line+'\n')
+        fout.close()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -447,6 +493,25 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = args.device
     inference(args.rpn_model_path, args.detect_model_path, args.avod_config_path)
 
+def visualize_rpn_out(sample, proposals_and_scores, rpn_score_threshold=0.1):
+    import mayavi.mlab as mlab
+    from viz_util import draw_lidar, draw_gt_boxes3d
+    nms_idxs = nms_on_bev(proposals_and_scores, 0.5)
+    proposals_and_scores = proposals_and_scores[nms_idxs]
+
+    proposal_boxes_3d = proposals_and_scores[:, 0:7]
+    proposal_scores = proposals_and_scores[:, 7]
+    score_mask = proposal_scores > rpn_score_threshold
+    # 3D box in the format [x, y, z, l, w, h, ry]
+    proposal_boxes_3d = proposal_boxes_3d[score_mask]
+    proposal_scores = proposal_scores[score_mask]
+
+    proposal_objs = list(map(lambda pair: ProposalObject(pair[0], pair[1], None, None), zip(proposal_boxes_3d, proposal_scores)))
+    propsasl_corners = list(map(lambda obj: compute_box_3d(obj), proposal_objs))
+    pc = sample[constants.KEY_POINT_CLOUD].T
+    fig = draw_lidar(pc)
+    fig = draw_gt_boxes3d(propsasl_corners, fig, draw_text=False, color=(1, 1, 1))
+    input()
 
 def test():
     parser = argparse.ArgumentParser()
@@ -460,12 +525,36 @@ def test():
     config_builder.get_configs_from_pipeline_file(
         args.avod_config_path, is_training=False)
     dataset = get_dataset(dataset_config, 'val')
-    for idx in range(100):
-        kitti_samples = dataset.load_samples([idx])
-        sample = kitti_samples[0]
-        rpn_out = pickle.load(open("rpn_out/%s" % sample[constants.KEY_SAMPLE_NAME], "rb"))
-        prediction = pickle.load(open("final_out/%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
-        visualize(dataset, sample, prediction)
+    # for idx in range(100):
+    #     idx = np.argwhere(dataset.sample_names=='001124').squeeze()
+    #     print(idx)
+    #     kitti_samples = dataset.load_samples([idx])
+    #     sample = kitti_samples[0]
+    #     rpn_out = pickle.load(open("rpn_out/%s" % sample[constants.KEY_SAMPLE_NAME], "rb"))
+    #     visualize_rpn_out(sample, rpn_out['proposals_and_scores'])
+    #     prediction = pickle.load(open("final_out/%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
+    #     visualize(dataset, sample, prediction)
+
+    idx = np.argwhere(dataset.sample_names=='001103').squeeze()
+    sample = dataset.load_samples([idx])[0]
+    with open('./pedestrian_samples.pickle','rb') as fp:
+        ids = pickle.load(fp, encoding='latin1')
+        gt_boxes_3d = pickle.load(fp, encoding='latin1')
+        pc_in_prop_box = pickle.load(fp, encoding='latin1')
+        tn = pickle.load(fp, encoding='latin1')
+
+        corners = []
+        for i, idx in enumerate(ids):
+            if idx == 1103:
+                corners.append(gt_boxes_3d[i])
+        import mayavi.mlab as mlab
+        from viz_util import draw_lidar, draw_gt_boxes3d
+        pc = sample[constants.KEY_POINT_CLOUD].T
+        fig = draw_lidar(pc)
+        # fig = draw_lidar(pc_in_prop_box[i], fig, pts_color=(1, 1, 1))
+        fig = draw_gt_boxes3d(corners, fig, color=(1, 1, 1))
+        input()
 
 if __name__ == '__main__':
-    main()
+    # main()
+    test()
