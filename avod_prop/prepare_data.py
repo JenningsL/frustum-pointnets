@@ -212,7 +212,9 @@ def balance(type_idxs, pos_neg_ratio=1):
         non_people_keep_num += len(type_idxs['Cyclist'])
     if non_people_keep_num > 0:
         random.shuffle(type_idxs['NonPeople'])
-        non_people_keep_num = int(non_people_keep_num/pos_neg_ratio)
+        # to reduce false positive, keep all negative samples
+        non_people_keep_num = len(type_idxs['NonPeople'])
+        # non_people_keep_num = int(non_people_keep_num/pos_neg_ratio)
         keep_idxs += type_idxs['NonPeople'][:non_people_keep_num]
         print('********People negative samples: %d' % non_people_keep_num)
 
