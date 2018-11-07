@@ -25,7 +25,7 @@ from wavedata.tools.visualization import vis_utils
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
-# import frustum_pointnets_v2
+import frustum_pointnets_v2
 sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
 from kitti_object_avod import non_max_suppression
 # sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
@@ -304,18 +304,8 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     # 2d nms on bev
     nms_idxs = nms_on_bev(output, 0.01)
     output = [output[i] for i in nms_idxs]
-    # raw output after nms
-    raw_output = {
-        'type_list': type_cls[nms_idxs],
-        'center_list': centers[nms_idxs],
-        'heading_cls_list': heading_cls[nms_idxs],
-        'heading_res_list': heading_res[nms_idxs],
-        'size_cls_list': size_cls[nms_idxs],
-        'size_res_list': size_res[nms_idxs],
-        'rot_angle_list': rot_angle_list[nms_idxs],
-        'score_list': scores[nms_idxs]
-    }
-    return output, raw_output
+
+    return output
 
 def visualize(dataset, sample, prediction):
     BOX_COLOUR_SCHEME = {
@@ -428,14 +418,20 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         '''
         # run frustum_pointnets_v2
         point_clouds, feature_vec, rot_angle_list = get_pointnet_input(sample, proposals_and_scores, roi_features)
-        prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
+        try:
+            prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
+        except:
+            print('exception')
+            continue
 
         elapsed_time = time.time() - start_time
         print(sample[constants.KEY_SAMPLE_NAME], elapsed_time)
         # concat all predictions for kitti eval
         id_list = np.ones((len(prediction),)) * int(sample[constants.KEY_SAMPLE_NAME])
         if all_id_list is None:
-            all_id_list = np.concatenate(all_id_list, id_list)
+            all_id_list = id_list
+        else:
+            all_id_list = np.concatenate((all_id_list, id_list), axis=0)
         all_prediction += prediction
         # save result
         pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out/%s"%sample[constants.KEY_SAMPLE_NAME], "wb"))
@@ -446,14 +442,15 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
 
 def write_detection_results(result_dir, predictions, id_list):
     ''' Write frustum pointnets results to KITTI format label files. '''
+    type_names = ['Car', 'Pedestrian', 'Cyclist']
     if result_dir is None: return
     results = {} # map from idx to list of strings, each string is a line (without \n)
     for i in range(len(predictions)):
         idx = id_list[i]
-        output_str = type_list[i] + " -1 -1 -10 "
+        tx,ty,tz,l,w,h,ry,score,obj_type = predictions[i]
+        output_str = type_names[obj_type] + " -1 -1 -10 "
         box2d = [0.0, 0.0, 1.0, 1.0] # fake 2d box
         output_str += "%f %f %f %f " % (box2d[0],box2d[1],box2d[2],box2d[3])
-        h,w,l,tx,ty,tz,ry,score = predictions
         output_str += "%f %f %f %f %f %f %f %f" % (h,w,l,tx,ty,tz,ry,score)
         if idx not in results: results[idx] = []
         results[idx].append(output_str)
@@ -558,5 +555,4 @@ def test():
         input()
 
 if __name__ == '__main__':
-    # main()
-    test()
+    main()
