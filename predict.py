@@ -398,7 +398,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
 
     all_prediction = []
     all_id_list = None
-    for idx in range(1000):
+    for idx in range(3769):
         feed_dict1 = rpn_model.create_feed_dict()
         kitti_samples = dataset.load_samples([idx])
         sample = kitti_samples[0]
