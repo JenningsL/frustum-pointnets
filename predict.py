@@ -32,6 +32,8 @@ from kitti_object_avod import non_max_suppression
 sys.path.append(os.path.join(ROOT_DIR, 'train'))
 import provider
 
+type_names = ['Car', 'Pedestrian', 'Cyclist', 'Background']
+
 class ProposalObject(object):
     def __init__(self, box_3d, score=0.0, type='Car', roi_features=None):
         # [x, y, z, l, w, h, ry]
@@ -294,12 +296,11 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
             heading_cls[i], heading_res[i],
             size_cls[i], size_res[i], rot_angle_list[i])
         # FIXME: this offset should be fixed in get_pointnet_input
-        tx, ty, yz = rotate_pc_along_y(np.expand_dims(np.asarray([tx,ty,tz]), 0), -np.pi/2)[0]
-        ry -= np.pi/2
+        tx, ty, tz = rotate_pc_along_y(np.expand_dims(np.asarray([tx,ty,tz]), 0), -np.pi/2)[0]
+        ry += np.pi/2
 
         obj_type = type_cls[i]
         confidence = scores[i]
-        # print(tx,ty,tz,l,w,h,ry,confidence,obj_type)
         output.append([tx,ty,tz,l,w,h,ry,confidence,obj_type])
     # 2d nms on bev
     nms_idxs = nms_on_bev(output, 0.01)
@@ -320,13 +321,13 @@ def visualize(dataset, sample, prediction):
                                 int(sample_name),
                                 display=False,
                                 fig_size=fig_size)
-    type_names = ['Car', 'Pedestrian', 'Cyclist', 'Background']
     pc = sample[constants.KEY_POINT_CLOUD].T
     all_corners = []
     for pred in prediction:
         box = np.array(pred[0:7])
         obj = box_3d_encoder.box_3d_to_object_label(box, obj_type=type_names[pred[8]])
         obj.score = pred[7]
+        print(obj.t)
 
         vis_utils.draw_box_3d(pred_3d_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
                           show_orientation=False,
@@ -390,10 +391,17 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
 
     all_prediction = []
     all_id_list = None
+    all_2d_boxes = []
     for idx in range(3769):
         feed_dict1 = rpn_model.create_feed_dict()
         kitti_samples = dataset.load_samples([idx])
         sample = kitti_samples[0]
+        '''
+        if sample[constants.KEY_SAMPLE_NAME] < '001100':
+            continue
+        if sample[constants.KEY_SAMPLE_NAME] > '001200':
+            break
+        '''
         start_time = time.time()
         rpn_predictions = sess1.run(rpn_endpoints, feed_dict=feed_dict1)
         top_anchors = rpn_predictions[RpnModel.PRED_TOP_ANCHORS]
@@ -432,24 +440,32 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
             all_id_list = id_list
         else:
             all_id_list = np.concatenate((all_id_list, id_list), axis=0)
+        for pred in prediction:
+            obj = box_3d_encoder.box_3d_to_object_label(np.array(pred[0:7]), obj_type=type_names[pred[8]])
+            corners = compute_box_3d(obj)
+            projected = calib_utils.project_to_image(corners.T, sample[constants.KEY_STEREO_CALIB_P2])
+            x1 = np.amin(projected[0])
+            y1 = np.amin(projected[1])
+            x2 = np.amax(projected[0])
+            y2 = np.amax(projected[1])
+            all_2d_boxes.append([x1, y1, x2, y2])
         all_prediction += prediction
         # save result
         pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out/%s"%sample[constants.KEY_SAMPLE_NAME], "wb"))
         pickle.dump(prediction, open('final_out/%s' % sample[constants.KEY_SAMPLE_NAME], 'wb'))
         visualize(dataset, sample, prediction)
     # for kitti eval
-    write_detection_results('./detection_results', all_prediction, all_id_list)
+    write_detection_results('./detection_results', all_prediction, all_id_list, all_2d_boxes)
 
-def write_detection_results(result_dir, predictions, id_list):
+def write_detection_results(result_dir, predictions, id_list, boxes_2d):
     ''' Write frustum pointnets results to KITTI format label files. '''
-    type_names = ['Car', 'Pedestrian', 'Cyclist']
     if result_dir is None: return
     results = {} # map from idx to list of strings, each string is a line (without \n)
     for i in range(len(predictions)):
         idx = id_list[i]
         tx,ty,tz,l,w,h,ry,score,obj_type = predictions[i]
         output_str = type_names[obj_type] + " -1 -1 -10 "
-        box2d = [0.0, 0.0, 1.0, 1.0] # fake 2d box
+        box2d = boxes_2d[i]
         output_str += "%f %f %f %f " % (box2d[0],box2d[1],box2d[2],box2d[3])
         output_str += "%f %f %f %f %f %f %f %f" % (h,w,l,tx,ty,tz,ry,score)
         if idx not in results: results[idx] = []
