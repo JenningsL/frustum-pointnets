@@ -77,7 +77,7 @@ class AvodDataset(object):
         end = start + self.batch_size
         while end > len(self.input_list) and not self.is_all_loaded():
             self.load_frame_data()
-        if end >= len(self.input_list) and self.is_all_loaded:
+        if end >= len(self.input_list) and self.is_all_loaded():
             # reach end
             end = len(self.input_list)
             self.cur_batch = -1
@@ -205,7 +205,6 @@ class AvodDataset(object):
 
 
     def load_frame_data(self):
-        self.load_progress += 1
         data_idx = int(self.frame_ids[self.load_progress])
         print(data_idx)
         calib = self.kitti_dataset.get_calibration(data_idx) # 3 by 4 matrix
@@ -242,11 +241,26 @@ class AvodDataset(object):
                 # neg_proposals_in_frame.append(prop_corners_3d)
 
                 # get points within proposal box
-                _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+                # FIXME: sometimes this raise error
+                try:
+                    _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+                except Exception as e:
+                    print(e)
+                    continue
+
                 pc_in_prop_box = pc_rect[prop_inds,:]
                 # shuffle points order
                 np.random.shuffle(pc_in_prop_box)
                 label = np.zeros((pc_in_prop_box.shape[0]))
+
+                self.box3d_list.append(gt_box_3d)
+                self.input_list.append(pc_in_prop_box)
+                self.label_list.append(label)
+                self.type_list.append(obj_type)
+                self.heading_list.append(heading_angle)
+                self.box3d_size_list.append(box3d_size)
+                self.frustum_angle_list.append(frustum_angle)
+                self.roi_feature_list.append(prop_.roi_features)
             else:
                 # only do augmentation on objects
                 for _ in range(self.augmentX):
@@ -258,7 +272,13 @@ class AvodDataset(object):
                         # print('skip proposal behind camera')
                         continue
                     # get points within proposal box
-                    _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+                    # FIXME: sometimes this raise error
+                    try:
+                        _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+                    except Exception as e:
+                        print(e)
+                        continue
+
                     pc_in_prop_box = pc_rect[prop_inds,:]
                     # shuffle points order
                     np.random.shuffle(pc_in_prop_box)
@@ -269,7 +289,13 @@ class AvodDataset(object):
                     obj_type = obj.type
                     gt_box_3d = gt_boxes_3d[obj_idx]
 
-                    _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
+                    # FIXME: sometimes this raise error
+                    try:
+                        _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
+                    except Exception as e:
+                        print(e)
+                        continue
+
                     label[inds] = 1
                     # Reject object without points
                     if np.sum(label)==0:
@@ -291,14 +317,15 @@ class AvodDataset(object):
                     frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                         box2d_center_rect[0,0])
 
-            self.box3d_list.append(gt_box_3d)
-            self.input_list.append(pc_in_prop_box)
-            self.label_list.append(label)
-            self.type_list.append(obj_type)
-            self.heading_list.append(heading_angle)
-            self.box3d_size_list.append(box3d_size)
-            self.frustum_angle_list.append(frustum_angle)
-            self.roi_feature_list.append(prop_.roi_features)
+                    self.box3d_list.append(gt_box_3d)
+                    self.input_list.append(pc_in_prop_box)
+                    self.label_list.append(label)
+                    self.type_list.append(obj_type)
+                    self.heading_list.append(heading_angle)
+                    self.box3d_size_list.append(box3d_size)
+                    self.frustum_angle_list.append(frustum_angle)
+                    self.roi_feature_list.append(prop_.roi_features)
+        self.load_progress += 1
 
     def find_match_label(self, prop_corners, labels_corners, iou_threshold=0.5):
         '''
@@ -326,5 +353,6 @@ if __name__ == '__main__':
     kitti_path = sys.argv[1]
     dataset = AvodDataset(512, kitti_path, 16, 'train',
                  random_flip=True, random_shift=True, rotate_to_center=True)
-    for i in range(100):
-        print(dataset.get_next_batch()[1])
+    while(True):
+        if dataset.get_next_batch()[-1]:
+            break
