@@ -348,7 +348,7 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
         iou3d_correct_cnt += np.sum(iou3ds[obj_mask]>=0.7)
 
         if (batch_idx+1)%10 == 0:
-            log_string(' -- %03d / %03d --' % (batch_idx+1, num_batches))
+            log_string(' -- %03d --' % (batch_idx+1))
             log_string('mean loss: %f' % (loss_sum / 10))
             log_string('classification accuracy: %f' % \
                 (total_cls_correct / float(total_cls_seen)))
