@@ -16,6 +16,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
+from avod_dataset import AvodDataset
 import provider
 from train_util import get_batch
 
@@ -279,13 +280,13 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
     log_string(str(datetime.now()))
 
     # Shuffle train samples
-    if not idxs_to_use:
-        train_idxs = np.arange(0, len(TRAIN_DATASET))
-    else:
-        log_string('Training with classification hard samples.')
-        train_idxs = idxs_to_use
-    np.random.shuffle(train_idxs)
-    num_batches = len(train_idxs)/BATCH_SIZE
+    # if not idxs_to_use:
+    #     train_idxs = np.arange(0, len(TRAIN_DATASET))
+    # else:
+    #     log_string('Training with classification hard samples.')
+    #     train_idxs = idxs_to_use
+    # np.random.shuffle(train_idxs)
+    # num_batches = len(train_idxs)/BATCH_SIZE
 
     # To collect statistics
     total_cls_correct = 0
@@ -299,11 +300,13 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
     iou3d_correct_cnt = 0
 
     # Training with batches
-    for batch_idx in range(num_batches):
+    # for batch_idx in range(num_batches):
+    batch_idx = 0
+    while(True):
         batch_data, batch_cls_label, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec = TRAIN_DATASET.get_next_batch()
+        batch_rot_angle, batch_feature_vec, is_last_batch = TRAIN_DATASET.get_next_batch()
 
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
@@ -365,6 +368,9 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
             iou2ds_sum = 0
             iou3ds_sum = 0
             iou3d_correct_cnt = 0
+        if is_last_batch:
+            break
+        batch_idx += 1
 
 
 def eval_one_epoch(sess, ops, test_writer):
@@ -375,8 +381,8 @@ def eval_one_epoch(sess, ops, test_writer):
     is_training = False
     log_string(str(datetime.now()))
     log_string('---- EPOCH %03d EVALUATION ----'%(EPOCH_CNT))
-    test_idxs = np.arange(0, len(TEST_DATASET))
-    num_batches = len(TEST_DATASET)/BATCH_SIZE
+    # test_idxs = np.arange(0, len(TEST_DATASET))
+    # num_batches = len(TEST_DATASET)/BATCH_SIZE
 
     # To collect statistics
     total_cls_correct = 0
@@ -392,14 +398,13 @@ def eval_one_epoch(sess, ops, test_writer):
     iou3d_correct_cnt = 0
 
     # Simple evaluation with batches
-    for batch_idx in range(num_batches):
-        start_idx = batch_idx * BATCH_SIZE
-        end_idx = (batch_idx+1) * BATCH_SIZE
-
+    # for batch_idx in range(num_batches):
+    num_batches = 0
+    while(True):
         batch_data, batch_cls_label, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec = TEST_DATASET.get_next_batch()
+        batch_rot_angle, batch_feature_vec, is_last_batch = TEST_DATASET.get_next_batch()
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
                      ops['cls_label_pl']: batch_cls_label,
@@ -418,7 +423,7 @@ def eval_one_epoch(sess, ops, test_writer):
                 feed_dict=feed_dict)
         test_writer.add_summary(summary, step)
         if np.isnan(loss_val):
-            print('nan loss in batch: ', batch_idx)
+            print('nan loss in batch: ', num_batches)
             print('loss_endpoints: ', loss_endpoints)
 
         # classification acc
@@ -444,6 +449,9 @@ def eval_one_epoch(sess, ops, test_writer):
         iou3ds_sum += np.sum(iou3ds[obj_mask])
         iou3d_correct_cnt += np.sum(iou3ds[obj_mask]>=0.7)
 
+        num_batches += 1
+        if is_last_batch:
+            break
         # for i in range(BATCH_SIZE):
         #     segp = preds_val[i,:]
         #     segl = batch_label[i,:]

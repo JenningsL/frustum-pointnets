@@ -49,8 +49,7 @@ class AvodDataset(object):
         proposal_files = [f for f in os.listdir(rpn_output_path) if is_prop_file(f)]
         self.frame_ids = map(lambda x: x.replace('.txt', ''), proposal_files)
         self.frame_ids = list(set(self.load_split_ids(split)).intersection(self.frame_ids))
-        print(self.frame_ids)
-        self.cur_batch = 0
+        self.cur_batch = -1
         self.load_progress = 0
         self.batch_size = batch_size
         self.augmentX = 1
@@ -67,15 +66,13 @@ class AvodDataset(object):
     def load_split_ids(self, split):
         with open(os.path.join(self.kitti_path, split + '.txt')) as f:
             return [line.rstrip('\n') for line in f]
-    # def __len__(self):
-    #     len(self.frame_ids) * self.proposal_per_frame
-    #
-    # def __getitem__(self, index):
-    #     idx = int(index / self.proposal_per_frame)
+
     def is_all_loaded(self):
         return self.load_progress >= len(self.frame_ids)
 
     def get_next_batch(self):
+        is_last_batch = False
+        self.cur_batch += 1
         start = self.cur_batch * self.batch_size
         end = start + self.batch_size
         while end > len(self.input_list) and not self.is_all_loaded():
@@ -83,7 +80,8 @@ class AvodDataset(object):
         if end >= len(self.input_list) and self.is_all_loaded:
             # reach end
             end = len(self.input_list)
-            self.cur_batch = 0
+            self.cur_batch = -1
+            is_last_batch = True
         bsize = end - start
         batch_data = np.zeros((bsize, self.npoints, self.num_channel))
         batch_cls_label = np.zeros((bsize,), dtype=np.int32)
@@ -111,7 +109,7 @@ class AvodDataset(object):
         return batch_data, batch_cls_label, batch_label, batch_center, \
             batch_heading_class, batch_heading_residual, \
             batch_size_class, batch_size_residual, \
-            batch_rot_angle, batch_feature_vec
+            batch_rot_angle, batch_feature_vec, is_last_batch
 
     def get_center_view_rot_angle(self, index):
         ''' Get the frustum rotation angle, it isshifted by pi/2 so that it
@@ -328,4 +326,5 @@ if __name__ == '__main__':
     kitti_path = sys.argv[1]
     dataset = AvodDataset(512, kitti_path, 16, 'train',
                  random_flip=True, random_shift=True, rotate_to_center=True)
-    print(dataset.get_next_batch())
+    for i in range(100):
+        print(dataset.get_next_batch()[1])
