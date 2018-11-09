@@ -363,8 +363,6 @@ def visualize(dataset, sample, prediction):
                                 fig_size=fig_size)
     pc = sample[constants.KEY_POINT_CLOUD].T
     # draw prediction on second image
-    nms_idxs = nms_on_bev(prediction, 0.01)
-    prediction = [prediction[i] for i in nms_idxs]
     pred_corners = draw_boxes(prediction, sample, pred_3d_axes)
 
     # draw groundtruth on first image
