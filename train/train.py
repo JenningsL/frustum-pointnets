@@ -67,12 +67,16 @@ BN_DECAY_DECAY_STEP = float(DECAY_STEP)
 BN_DECAY_CLIP = 0.99
 
 # Load Frustum Datasets. Use default data paths.
-TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
-    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train%s.pickle'%FLAGS.pickle,
-    rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=True)
-TEST_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='val',
-    overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val%s.pickle'%FLAGS.pickle,
-    rotate_to_center=True, extra_feature=True)
+TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
+             random_flip=False, random_shift=False, rotate_to_center=True)
+TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
+             random_flip=False, random_shift=False, rotate_to_center=True)
+# TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
+#     overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train%s.pickle'%FLAGS.pickle,
+#     rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=True)
+# TEST_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='val',
+#     overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val%s.pickle'%FLAGS.pickle,
+#     rotate_to_center=True, extra_feature=True)
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -296,15 +300,10 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
 
     # Training with batches
     for batch_idx in range(num_batches):
-        start_idx = batch_idx * BATCH_SIZE
-        end_idx = (batch_idx+1) * BATCH_SIZE
-
         batch_data, batch_cls_label, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec = \
-            get_batch(TRAIN_DATASET, train_idxs, start_idx, end_idx,
-                NUM_POINT, NUM_CHANNEL)
+        batch_rot_angle, batch_feature_vec = TRAIN_DATASET.get_next_batch()
 
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
@@ -400,9 +399,7 @@ def eval_one_epoch(sess, ops, test_writer):
         batch_data, batch_cls_label, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec = \
-            get_batch(TEST_DATASET, test_idxs, start_idx, end_idx,
-                NUM_POINT, NUM_CHANNEL)
+        batch_rot_angle, batch_feature_vec = TEST_DATASET.get_next_batch()
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
                      ops['cls_label_pl']: batch_cls_label,
