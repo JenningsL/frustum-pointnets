@@ -33,6 +33,11 @@ sys.path.append(os.path.join(ROOT_DIR, 'train'))
 import provider
 
 type_names = ['Car', 'Pedestrian', 'Cyclist', 'Background']
+BOX_COLOUR_SCHEME = {
+    'Car': '#00FF00',           # Green
+    'Pedestrian': '#00FFFF',    # Teal
+    'Cyclist': '#FFFF00'        # Yellow
+}
 
 class ProposalObject(object):
     def __init__(self, box_3d, score=0.0, type='Car', roi_features=None):
@@ -170,12 +175,15 @@ def compute_box_3d(obj):
     return corners_3d.T
 
 def nms_on_bev(boxes_3d, iou_threshold=0.1):
-    bev_boxes = list(map(lambda p: [p[0] - p[3]/2, p[2] - p[5]/2, p[0] + p[3]/2, p[2] + p[5]/2, p[7]], boxes_3d))
+    scores = np.asarray(boxes_3d)[:,7]
+    boxes_3d = np.asarray(boxes_3d)[:,0:7]
+    corners = list(map(lambda box: compute_box_3d(box_3d_encoder.box_3d_to_object_label(box)), boxes_3d))
+    # TODO: use Polygon to do nms
+    bev_boxes = list(map(lambda p: [np.amin(p[0],axis=0)[0], np.amin(p[0], axis=0)[2], np.amax(p[0], axis=0)[0], np.amax(p[0], axis=0)[2], p[1]], zip(corners, scores)))
     bev_boxes = np.array(bev_boxes)
-    print('fianl output before nms: {0}'.format(len(bev_boxes)))
+    print('final output before nms: {0}'.format(len(bev_boxes)))
     nms_idxs = non_max_suppression(bev_boxes, iou_threshold)
-    print('fianl output after nms: {0}'.format(len(nms_idxs)))
-    # output = [output[i] for i in nms_idxs]
+    print('final output after nms: {0}'.format(len(nms_idxs)))
     return nms_idxs
 
 def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_threshold=0.1):
@@ -275,8 +283,8 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         heading_prob = np.max(softmax(batch_heading_scores),1) # B
         size_prob = np.max(softmax(batch_size_scores),1) # B,
         batch_scores = (batch_cls_prob + mask_mean_prob + heading_prob + size_prob) / 4
-        # scores[begin:end] = batch_cls_prob
-        scores[begin:end] = batch_scores
+        scores[begin:end] = batch_cls_prob
+        # scores[begin:end] = batch_scores
         # Finished computing scores
 
     type_cls = np.argmax(logits, 1)
@@ -308,28 +316,15 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
 
     return output
 
-def visualize(dataset, sample, prediction):
-    BOX_COLOUR_SCHEME = {
-        'Car': '#00FF00',           # Green
-        'Pedestrian': '#00FFFF',    # Teal
-        'Cyclist': '#FFFF00'        # Yellow
-    }
-    fig_size = (10, 6.1)
-    sample_name = sample[constants.KEY_SAMPLE_NAME]
-    pred_fig, pred_2d_axes, pred_3d_axes = \
-        vis_utils.visualization(dataset.rgb_image_dir,
-                                int(sample_name),
-                                display=False,
-                                fig_size=fig_size)
-    pc = sample[constants.KEY_POINT_CLOUD].T
+def draw_boxes(prediction, sample, plot_axes):
     all_corners = []
     for pred in prediction:
         box = np.array(pred[0:7])
-        obj = box_3d_encoder.box_3d_to_object_label(box, obj_type=type_names[pred[8]])
+        cls_idx = int(pred[8])
+        obj = box_3d_encoder.box_3d_to_object_label(box, obj_type=type_names[cls_idx])
         obj.score = pred[7]
-        print(obj.t)
 
-        vis_utils.draw_box_3d(pred_3d_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
+        vis_utils.draw_box_3d(plot_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
                           show_orientation=False,
                           color_table=['r', 'y', 'r', 'w'],
                           line_width=2,
@@ -346,7 +341,7 @@ def visualize(dataset, sample, prediction):
         text_x = (x1 + x2) / 2
         text_y = y1
         text = "{}\n{:.2f}".format(obj.type, obj.score)
-        pred_3d_axes.text(text_x, text_y - 4,
+        plot_axes.text(text_x, text_y - 4,
             text,
             verticalalignment='bottom',
             horizontalalignment='center',
@@ -356,11 +351,34 @@ def visualize(dataset, sample, prediction):
             path_effects=[
                 patheffects.withStroke(linewidth=2,
                                        foreground='black')])
+    return all_corners
+
+def visualize(dataset, sample, prediction):
+    fig_size = (10, 6.1)
+    sample_name = sample[constants.KEY_SAMPLE_NAME]
+    pred_fig, pred_2d_axes, pred_3d_axes = \
+        vis_utils.visualization(dataset.rgb_image_dir,
+                                int(sample_name),
+                                display=False,
+                                fig_size=fig_size)
+    pc = sample[constants.KEY_POINT_CLOUD].T
+    # draw prediction on second image
+    nms_idxs = nms_on_bev(prediction, 0.01)
+    prediction = [prediction[i] for i in nms_idxs]
+    pred_corners = draw_boxes(prediction, sample, pred_3d_axes)
+
+    # draw groundtruth on first image
+    label_boxes = sample[constants.KEY_LABEL_BOXES_3D]
+    label_classes = np.expand_dims(sample[constants.KEY_LABEL_CLASSES], axis=1).astype(int) - 1
+    label_scores = np.ones((len(label_classes), 1))
+    labels = np.concatenate((label_boxes, label_scores, label_classes), axis=1)
+    pred_corners = draw_boxes(labels, sample, pred_2d_axes)
+
     # 3d visualization
     # import mayavi.mlab as mlab
     # from viz_util import draw_lidar, draw_gt_boxes3d
     # fig = draw_lidar(pc)
-    # fig = draw_gt_boxes3d(all_corners, fig, draw_text=False, color=(1, 1, 1))
+    # fig = draw_gt_boxes3d(pred_corners, fig, draw_text=False, color=(1, 1, 1))
     # # mlab.plot3d([0, center_rect[0]], [0, center_rect[1]], [0, center_rect[2]], color=(1,1,1), tube_radius=None, figure=fig)
     # input()
 
@@ -368,6 +386,7 @@ def visualize(dataset, sample, prediction):
     filename = 'final_out_viz/%s.png' % sample_name
     plt.savefig(filename)
     plt.close(pred_fig)
+
     # plt.show()
     # input()
 
@@ -535,40 +554,25 @@ def test():
                     dest='avod_config_path',
                     required=True,
                     help='avod_config_path')
+    parser.add_argument('--sample_idx',
+                    type=str,
+                    dest='sample_idx',
+                    required=True,
+                    help='sample id')
     args = parser.parse_args()
     _, _, _, dataset_config = \
     config_builder.get_configs_from_pipeline_file(
         args.avod_config_path, is_training=False)
     dataset = get_dataset(dataset_config, 'val')
-    # for idx in range(100):
-    #     idx = np.argwhere(dataset.sample_names=='001124').squeeze()
-    #     print(idx)
-    #     kitti_samples = dataset.load_samples([idx])
-    #     sample = kitti_samples[0]
-    #     rpn_out = pickle.load(open("rpn_out/%s" % sample[constants.KEY_SAMPLE_NAME], "rb"))
-    #     visualize_rpn_out(sample, rpn_out['proposals_and_scores'])
-    #     prediction = pickle.load(open("final_out/%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
-    #     visualize(dataset, sample, prediction)
 
-    idx = np.argwhere(dataset.sample_names=='001103').squeeze()
-    sample = dataset.load_samples([idx])[0]
-    with open('./pedestrian_samples.pickle','rb') as fp:
-        ids = pickle.load(fp, encoding='latin1')
-        gt_boxes_3d = pickle.load(fp, encoding='latin1')
-        pc_in_prop_box = pickle.load(fp, encoding='latin1')
-        tn = pickle.load(fp, encoding='latin1')
-
-        corners = []
-        for i, idx in enumerate(ids):
-            if idx == 1103:
-                corners.append(gt_boxes_3d[i])
-        import mayavi.mlab as mlab
-        from viz_util import draw_lidar, draw_gt_boxes3d
-        pc = sample[constants.KEY_POINT_CLOUD].T
-        fig = draw_lidar(pc)
-        # fig = draw_lidar(pc_in_prop_box[i], fig, pts_color=(1, 1, 1))
-        fig = draw_gt_boxes3d(corners, fig, color=(1, 1, 1))
-        input()
+    idx = np.argwhere(dataset.sample_names==args.sample_idx).squeeze()
+    # print(idx)
+    kitti_samples = dataset.load_samples([idx])
+    sample = kitti_samples[0]
+    # rpn_out = pickle.load(open("rpn_out/%s" % sample[constants.KEY_SAMPLE_NAME], "rb"))
+    # visualize_rpn_out(sample, rpn_out['proposals_and_scores'])
+    prediction = pickle.load(open("%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
+    visualize(dataset, sample, prediction)
 
 if __name__ == '__main__':
     main()
