@@ -5,6 +5,7 @@ import sys
 import numpy as np
 import copy
 import random
+import threading
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'kitti'))
@@ -81,14 +82,8 @@ class AvodDataset(object):
         self.frame_pos_sample_idxs = {} # frame_id to sample id list
         self.frame_neg_sample_idxs = {}
 
-        self.box3d_list = []
-        self.input_list = []
-        self.label_list = []
-        self.type_list = []
-        self.heading_list = []
-        self.box3d_size_list = []
-        self.frustum_angle_list = []
-        self.roi_feature_list = []
+        self.lock = threading.Lock()
+
 
     def load_split_ids(self, split):
         with open(os.path.join(self.kitti_path, split + '.txt')) as f:
@@ -96,6 +91,24 @@ class AvodDataset(object):
 
     def is_all_loaded(self):
         return self.load_progress >= len(self.frame_ids)
+
+    def load_range(self, start, end):
+        for i in range(start, end):
+            self.load_frame_data(self.frame_ids[i])
+
+    def preload(self, thread_num=1):
+        assert(thread_num <= len(self.frame_ids))
+        batch = len(self.frame_ids) / thread_num
+        threads = []
+        for i in range(thread_num):
+            start = i * batch
+            end = min(len(self.frame_ids), start + batch)
+            print(start, end)
+            t = threading.Thread(target=self.load_range, args=(start, end))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
 
     def resample_and_shuffle(self):
         '''shuffle on frames, resample'''
@@ -260,13 +273,14 @@ class AvodDataset(object):
         count = {'pos': len(pos_samples), 'neg': len(keep_idxs) - len(pos_samples)}
         return keep_idxs, count
 
-    def load_frame_data(self):
+    def load_frame_data(self, data_idx_str):
         '''load data for the first time'''
         if self.is_all_loaded():
             return
-        data_idx_str = self.frame_ids[self.load_progress]
+        # data_idx_str = self.frame_ids[self.load_progress]
+        start = time.time()
         data_idx = int(data_idx_str)
-        print(data_idx)
+        # print(data_idx)
         calib = self.kitti_dataset.get_calibration(data_idx) # 3 by 4 matrix
         objects = self.kitti_dataset.get_label_objects(data_idx)
         proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.1, nms_iou_thres=0.8)
@@ -281,9 +295,10 @@ class AvodDataset(object):
             _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
             gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
             gt_boxes_3d.append(gt_corners_3d)
-
+        # print('cost: {}'.format(time.time() - start))
         self.frame_pos_sample_idxs[data_idx_str] = []
         self.frame_neg_sample_idxs[data_idx_str] = []
+
         for prop_ in proposals:
             prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
             if prop_corners_image_2d is None:
@@ -316,9 +331,11 @@ class AvodDataset(object):
                 np.random.shuffle(pc_in_prop_box)
                 label = np.zeros((pc_in_prop_box.shape[0]))
 
+                self.lock.acquire()
                 sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
                     box3d_size, frustum_angle, prop_)
                 self.all_samples.append(sample)
+                self.lock.release()
                 self.frame_neg_sample_idxs[data_idx_str].append(sample.idx)
             else:
                 # only do augmentation on objects
@@ -376,12 +393,16 @@ class AvodDataset(object):
                     frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                         box2d_center_rect[0,0])
 
+                    self.lock.acquire()
                     sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
                         box3d_size, frustum_angle, prop_)
                     self.all_samples.append(sample)
+                    self.lock.release()
                     self.frame_pos_sample_idxs[data_idx_str].append(sample.idx)
         use_idxs, _ = self.sample_frame_pos_neg(self.frame_pos_sample_idxs[data_idx_str], self.frame_neg_sample_idxs[data_idx_str])
+        self.lock.acquire()
         self.available_sample_idxs += use_idxs
+        self.lock.release()
         self.load_progress += 1
 
     def find_match_label(self, prop_corners, labels_corners, iou_threshold=0.5):
@@ -414,14 +435,15 @@ if __name__ == '__main__':
                  augmentX=2, random_shift=True, rotate_to_center=True)
     import time
     start = time.time()
-    while(True):
-        batch = dataset.get_next_batch()
-        print(batch[1])
-        if batch[-1]:
-            break
-    while(True):
-        batch = dataset1.get_next_batch()
-        print(batch[1])
-        if batch[-1]:
-            break
+    dataset.preload(1)
+    # while(True):
+    #     batch = dataset.get_next_batch()
+    #     print(batch[1])
+    #     if batch[-1]:
+    #         break
+    # while(True):
+    #     batch = dataset1.get_next_batch()
+    #     print(batch[1])
+    #     if batch[-1]:
+    #         break
     print(time.time() - start)

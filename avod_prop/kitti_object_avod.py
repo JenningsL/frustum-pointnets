@@ -3,6 +3,7 @@ import sys
 import numpy as np
 import cv2
 from PIL import Image
+import time
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
@@ -109,12 +110,20 @@ class kitti_object_avod(kitti_object):
         # self.num_samples = len(os.listdir(self.image_dir))
         # print(self.num_samples)
 
+    def np_read_lines(self, filename, lines):
+        arr = []
+        with open(filename, 'rb') as fp:
+            for i, line in enumerate(fp):
+                if i in lines:
+                    arr.append(np.fromstring(line, dtype=float, sep=' '))
+        return np.array(arr)
+
     def get_proposals(self, idx, rpn_score_threshold=0.1, nms_iou_thres=0.3):
         assert(idx<self.num_samples)
         proposals_file_path = os.path.join(self.proposal_dir, '%06d.txt'%(idx))
         roi_file_path = os.path.join(self.proposal_dir, '%06d_roi.txt'%(idx))
         proposals_and_scores = np.loadtxt(proposals_file_path)
-        proposals_roi_features = np.loadtxt(roi_file_path)
+        keep_idxs = np.arange(0, len(proposals_and_scores))
         proposal_boxes_3d = proposals_and_scores[:, 0:7]
         proposal_scores = proposals_and_scores[:, 7]
 
@@ -122,13 +131,9 @@ class kitti_object_avod(kitti_object):
         score_mask = proposal_scores > rpn_score_threshold
         # 3D box in the format [x, y, z, l, w, h, ry]
         proposal_boxes_3d = proposal_boxes_3d[score_mask]
-        proposal_scores = proposal_scores[score_mask]
-        roi_features = proposals_roi_features[score_mask]
+        keep_idxs = keep_idxs[score_mask]
         proposal_objs = \
             [ProposalObject(box_3d) for box_3d in proposal_boxes_3d]
-        for obj, score, feat in zip(proposal_objs, proposal_scores, roi_features):
-            obj.score = score
-            obj.roi_features = feat
 
         boxes = []
         box_scores = []
@@ -146,4 +151,12 @@ class kitti_object_avod(kitti_object):
         nms_idxs = non_max_suppression(bev_boxes, nms_iou_thres)
         # print('after nms: {0}'.format(len(nms_idxs)))
         # boxes = [boxes[i] for i in nms_idxs]
-        return [proposal_objs[i] for i in nms_idxs]
+        keep_idxs = keep_idxs[nms_idxs]
+        proposals_roi_features = self.np_read_lines(roi_file_path, keep_idxs)
+        proposal_scores = proposal_scores[keep_idxs]
+        proposal_objs = [proposal_objs[i] for i in nms_idxs]
+        for obj, score, feat in zip(proposal_objs, proposal_scores, proposals_roi_features):
+            obj.score = score
+            obj.roi_features = feat
+
+        return proposal_objs
