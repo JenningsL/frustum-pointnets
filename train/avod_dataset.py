@@ -82,8 +82,7 @@ class AvodDataset(object):
         self.frame_pos_sample_idxs = {} # frame_id to sample id list
         self.frame_neg_sample_idxs = {}
 
-        self.lock = threading.Lock()
-
+        # self.lock = threading.Lock()
 
     def load_split_ids(self, split):
         with open(os.path.join(self.kitti_path, split + '.txt')) as f:
@@ -96,19 +95,10 @@ class AvodDataset(object):
         for i in range(start, end):
             self.load_frame_data(self.frame_ids[i])
 
-    def preload(self, thread_num=1):
-        assert(thread_num <= len(self.frame_ids))
-        batch = len(self.frame_ids) / thread_num
-        threads = []
-        for i in range(thread_num):
-            start = i * batch
-            end = min(len(self.frame_ids), start + batch)
-            print(start, end)
-            t = threading.Thread(target=self.load_range, args=(start, end))
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join()
+    def preload(self):
+        start = time.time()
+        self.load_range(0, len(self.frame_ids))
+        print('preload done, cost time: {}'.format(time.time() - start))
 
     def resample_and_shuffle(self):
         '''shuffle on frames, resample'''
@@ -331,11 +321,11 @@ class AvodDataset(object):
                 np.random.shuffle(pc_in_prop_box)
                 label = np.zeros((pc_in_prop_box.shape[0]))
 
-                self.lock.acquire()
+                # self.lock.acquire()
                 sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
                     box3d_size, frustum_angle, prop_)
                 self.all_samples.append(sample)
-                self.lock.release()
+                # self.lock.release()
                 self.frame_neg_sample_idxs[data_idx_str].append(sample.idx)
             else:
                 # only do augmentation on objects
@@ -393,17 +383,18 @@ class AvodDataset(object):
                     frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                         box2d_center_rect[0,0])
 
-                    self.lock.acquire()
+                    # self.lock.acquire()
                     sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
                         box3d_size, frustum_angle, prop_)
                     self.all_samples.append(sample)
-                    self.lock.release()
+                    # self.lock.release()
                     self.frame_pos_sample_idxs[data_idx_str].append(sample.idx)
         use_idxs, _ = self.sample_frame_pos_neg(self.frame_pos_sample_idxs[data_idx_str], self.frame_neg_sample_idxs[data_idx_str])
-        self.lock.acquire()
+        # self.lock.acquire()
         self.available_sample_idxs += use_idxs
-        self.lock.release()
+        # self.lock.release()
         self.load_progress += 1
+        # print('loading progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
 
     def find_match_label(self, prop_corners, labels_corners, iou_threshold=0.5):
         '''
@@ -434,8 +425,8 @@ if __name__ == '__main__':
     dataset1 = AvodDataset(512, kitti_path, 16, 'train',
                  augmentX=2, random_shift=True, rotate_to_center=True)
     import time
-    start = time.time()
-    dataset.preload(1)
+    dataset.preload()
+    pickle.dump(dataset, open('dataset.pkl', 'wb'))
     # while(True):
     #     batch = dataset.get_next_batch()
     #     print(batch[1])
@@ -446,4 +437,3 @@ if __name__ == '__main__':
     #     print(batch[1])
     #     if batch[-1]:
     #         break
-    print(time.time() - start)

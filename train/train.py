@@ -11,6 +11,8 @@ import argparse
 import importlib
 import numpy as np
 import tensorflow as tf
+import pickle
+from threading import Thread
 from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
@@ -71,12 +73,17 @@ TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BA
              augmentX=2, random_shift=True, rotate_to_center=True)
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
              augmentX=1, random_shift=False, rotate_to_center=True)
-# TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
-#     overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train%s.pickle'%FLAGS.pickle,
-#     rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=True)
-# TEST_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='val',
-#     overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_val%s.pickle'%FLAGS.pickle,
-#     rotate_to_center=True, extra_feature=True)
+
+data_loading_thread = Thread(target=load_data_in_background, args=(TRAIN_DATASET,))
+data_loading_thread.start()
+# TRAIN_DATASET.preload()
+# TEST_DATASET.preload()
+
+def load_data_in_background(train_set, test_set):
+    train_set.preload()
+    test_set.preload()
+    pickle.dump(train_set, open('./train_set', 'wb'))
+    pickle.dump(test_set, open('./test_set', 'wb'))
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -232,6 +239,7 @@ def train():
             else:
                 train_one_epoch(sess, ops, train_writer)
                 val_loss, avg_cls_acc = eval_one_epoch(sess, ops, test_writer)
+                data_loading_thread.join()
                 # Save the variables to disk.
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
