@@ -309,9 +309,9 @@ def get_loss(cls_label, mask_label, center_label, \
     cls_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(\
         logits=end_points['cls_logits'], labels=cls_label))
     tf.summary.scalar('classification loss', cls_loss)
-    is_obj_mask = tf.to_float(tf.not_equal(cls_label, 3))
+    is_obj_mask = tf.to_float(tf.not_equal(cls_label, g_type2onehotclass['NonObject']))
     #cls_label_pred = tf.argmax(tf.nn.softmax(end_points['cls_logits']), axis=1)
-    #is_obj_mask = tf.to_float(tf.not_equal(cls_label_pred, 3))
+    #is_obj_mask = tf.to_float(tf.not_equal(cls_label_pred, g_type2onehotclass['NonObject']))
     # 3D Segmentation loss
     mask_loss = tf.reduce_mean(tf.multiply(tf.nn.sparse_softmax_cross_entropy_with_logits(\
         logits=end_points['mask_logits'], labels=mask_label), tf.expand_dims(is_obj_mask, 1)))
