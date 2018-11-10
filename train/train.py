@@ -16,6 +16,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
+from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES
 from avod_dataset import AvodDataset
 import provider
 from train_util import get_batch
@@ -50,8 +51,6 @@ OPTIMIZER = FLAGS.optimizer
 DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
 NUM_CHANNEL = 3 if FLAGS.no_intensity else 4 # point feature channel
-NUM_SEG_CLASSES = 2 # segmentation has two classes
-NUM_OBJ_CLASSES = 4 # classification has 4 classes
 
 MODEL = importlib.import_module(FLAGS.model) # import network module
 MODEL_FILE = os.path.join(ROOT_DIR, 'models', FLAGS.model+'.py')
@@ -413,7 +412,7 @@ def eval_one_epoch(sess, ops, test_writer):
         if is_last_batch and len(batch_data) != BATCH_SIZE:
             # discard last batch with fewer data
             break
-            
+
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
                      ops['cls_label_pl']: batch_cls_label,

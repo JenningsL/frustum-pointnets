@@ -13,6 +13,7 @@ sys.path.append(os.path.join(ROOT_DIR, 'utils'))
 import tf_util
 from pointnet_util import pointnet_sa_module, pointnet_sa_module_msg, pointnet_fp_module
 from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER, NUM_OBJECT_POINT
+from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES
 from model_util import point_cloud_masking, get_center_regression_net
 from model_util import placeholder_inputs, parse_output_to_tensors, get_loss
 
@@ -54,15 +55,17 @@ def get_instance_seg_v2_net(point_cloud, feature_vec, cls_label,
     cls_net = tf.reshape(l3_points, [batch_size, -1])
     cls_net = tf.concat([cls_net, feature_vec], axis=1)
     cls_net = tf_util.fully_connected(cls_net, 512, bn=True, is_training=is_training, scope='cls_fc1', bn_decay=bn_decay)
-    cls_net = tf_util.dropout(cls_net, keep_prob=0.4, is_training=is_training, scope='cls_dp1')
+    cls_net = tf_util.dropout(cls_net, keep_prob=0.5, is_training=is_training, scope='cls_dp1')
     cls_net = tf_util.fully_connected(cls_net, 256, bn=True, is_training=is_training, scope='cls_fc2', bn_decay=bn_decay)
-    cls_net = tf_util.dropout(cls_net, keep_prob=0.4, is_training=is_training, scope='cls_dp2')
-    cls_net = tf_util.fully_connected(cls_net, 4, activation_fn=None, scope='cls_fc3')
+    cls_net = tf_util.dropout(cls_net, keep_prob=0.5, is_training=is_training, scope='cls_dp2')
+    cls_net = tf_util.fully_connected(cls_net, 128, bn=True, is_training=is_training, scope='cls_fc3', bn_decay=bn_decay)
+    cls_net = tf_util.dropout(cls_net, keep_prob=0.5, is_training=is_training, scope='cls_dp3')
+    cls_net = tf_util.fully_connected(cls_net, NUM_OBJ_CLASSES, activation_fn=None, scope='cls_logits')
     end_points['cls_logits'] = cls_net
 
     cls_label_pred = tf.argmax(tf.nn.softmax(end_points['cls_logits']), axis=1)
-    end_points['one_hot_vec'] = tf.one_hot(cls_label_pred, 4)
-    #end_points['one_hot_vec'] = tf.one_hot(cls_label, 4)
+    end_points['one_hot_vec'] = tf.one_hot(cls_label_pred, NUM_OBJ_CLASSES)
+    #end_points['one_hot_vec'] = tf.one_hot(cls_label, NUM_OBJ_CLASSES)
     # Feature Propagation layers
     l3_points = tf.concat([l3_points, tf.expand_dims(end_points['one_hot_vec'], 1)], axis=2)
     l2_points = pointnet_fp_module(l2_xyz, l3_xyz, l2_points, l3_points,

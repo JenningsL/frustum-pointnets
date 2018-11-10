@@ -10,13 +10,17 @@ import tf_util
 # Global Constants
 # -----------------
 
+NUM_SEG_CLASSES = 2 # segmentation has two classes
+# NUM_OBJ_CLASSES = 4 # classification
+NUM_OBJ_CLASSES = 2
 NUM_HEADING_BIN = 12
 NUM_SIZE_CLUSTER = 9 # one cluster for each type
 NUM_OBJECT_POINT = 512
 g_type2class={'Car':0, 'Van':1, 'Truck':2, 'Pedestrian':3,
               'Person_sitting':4, 'Cyclist':5, 'Tram':6, 'Misc':7, 'NonObject': 8}
 g_class2type = {g_type2class[t]:t for t in g_type2class}
-g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2, 'NonObject': 3}
+# g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2, 'NonObject': 3}
+g_type2onehotclass = {'Car': 0, 'NonObject': 1}
 g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
                     'Van': np.array([5.06763659,1.9007158,2.20532825]),
                     'Truck': np.array([10.13586957,2.58549199,3.2520595]),
@@ -401,7 +405,7 @@ def get_loss(cls_label, mask_label, center_label, \
     corners_dist = tf.minimum(corners_dist_, corners_dist_flip)
     corners_loss = huber_loss(corners_dist, delta=1.0)
     tf.summary.scalar('corners loss', corners_loss)
-    
+
     # Weighted sum of all losses
     total_loss = cls_loss*20 + mask_loss + box_loss_weight * (center_loss + \
         heading_class_loss + size_class_loss + \
