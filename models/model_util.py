@@ -16,6 +16,8 @@ NUM_OBJ_CLASSES = 2
 NUM_HEADING_BIN = 12
 NUM_SIZE_CLUSTER = 9 # one cluster for each type
 NUM_OBJECT_POINT = 512
+# type_whitelist = ['Car', 'Pedestrian', 'Cyclist', 'NonObject']
+type_whitelist = ['Car', 'NonObject']
 g_type2class={'Car':0, 'Van':1, 'Truck':2, 'Pedestrian':3,
               'Person_sitting':4, 'Cyclist':5, 'Tram':6, 'Misc':7, 'NonObject': 8}
 g_class2type = {g_type2class[t]:t for t in g_type2class}

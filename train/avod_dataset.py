@@ -15,10 +15,9 @@ from kitti_object_avod import *
 import kitti_util as utils
 from model_util import g_type2class, g_class2type, g_type2onehotclass, g_type_mean_size
 from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER
+from model_util import type_whitelist
 from provider import *
 from shapely.geometry import Polygon, MultiPolygon
-
-type_whitelist = ['Car', 'Pedestrian', 'Cyclist', 'NonObject']
 
 def random_shift_box3d(obj, shift_ratio=0.1):
     '''
@@ -60,9 +59,8 @@ class Sample(object):
 
 class AvodDataset(object):
     def __init__(self, npoints, kitti_path, batch_size, split,
-                 random_flip=False, random_shift=False, rotate_to_center=False):
+                 augmentX=1, random_shift=False, rotate_to_center=False):
         self.npoints = npoints
-        self.random_flip = random_flip
         self.random_shift = random_shift
         self.rotate_to_center = rotate_to_center
         self.kitti_path = kitti_path
@@ -78,7 +76,7 @@ class AvodDataset(object):
         self.cur_batch = -1
         self.load_progress = 0
         self.batch_size = batch_size
-        self.augmentX = 1
+        self.augmentX = 2
 
         self.all_samples = []
         self.available_sample_idxs = []
@@ -145,10 +143,18 @@ class AvodDataset(object):
         batch_feature_vec = np.zeros((bsize, self.all_samples[0].feature_vec.shape[0]))
         for i in range(bsize):
             sample = self.all_samples[self.available_sample_idxs[i+start]]
-            batch_data[i,...] = sample.point_set[:,0:self.num_channel]
+            point_set = copy.deepcopy(sample.point_set[:,0:self.num_channel])
+            box3d_center = copy.deepcopy(sample.box3d_center)
+            # Data Augmentation
+            if self.random_shift:
+                dist = np.sqrt(np.sum(box3d_center[0]**2+box3d_center[1]**2))
+                shift = np.clip(np.random.randn()*dist*0.05, dist*0.8, dist*1.2)
+                point_set[:,2] += shift
+                box3d_center[2] += shift
+            batch_data[i,...] = point_set
+            batch_center[i,:] = box3d_center
             batch_cls_label[i] = sample.cls_label
             batch_label[i,:] = sample.seg_label
-            batch_center[i,:] = sample.box3d_center
             batch_heading_class[i] = sample.angle_class
             batch_heading_residual[i] = sample.angle_residual
             batch_size_class[i] = sample.size_class
@@ -222,20 +228,6 @@ class AvodDataset(object):
 
         # Size
         size_class, size_residual = size2class(box3d_size, cls_type)
-
-        # Data Augmentation
-        # if self.random_flip:
-        #     # note: rot_angle won't be correct if we have random_flip
-        #     # so do not use it in case of random flipping.
-        #     if np.random.random()>0.5: # 50% chance flipping
-        #         point_set[:,0] *= -1
-        #         box3d_center[0] *= -1
-        #         heading_angle = np.pi - heading_angle
-        # if self.random_shift:
-        #     dist = np.sqrt(np.sum(box3d_center[0]**2+box3d_center[1]**2))
-        #     shift = np.clip(np.random.randn()*dist*0.05, dist*0.8, dist*1.2)
-        #     point_set[:,2] += shift
-        #     box3d_center[2] += shift
 
         angle_class, angle_residual = angle2class(heading_angle,
             NUM_HEADING_BIN)
@@ -419,7 +411,7 @@ class AvodDataset(object):
 if __name__ == '__main__':
     kitti_path = sys.argv[1]
     dataset = AvodDataset(512, kitti_path, 16, 'train',
-                 random_flip=True, random_shift=True, rotate_to_center=True)
+                 augmentX=2, random_shift=True, rotate_to_center=True)
     import time
     start = time.time()
     while(True):

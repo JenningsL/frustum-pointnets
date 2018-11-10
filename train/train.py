@@ -68,9 +68,9 @@ BN_DECAY_CLIP = 0.99
 
 # Load Frustum Datasets. Use default data paths.
 TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
-             random_flip=False, random_shift=False, rotate_to_center=True)
+             augmentX=2, random_shift=True, rotate_to_center=True)
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             random_flip=False, random_shift=False, rotate_to_center=True)
+             augmentX=1, random_shift=False, rotate_to_center=True)
 # TRAIN_DATASET = provider.FrustumDataset(npoints=NUM_POINT, split='train',
 #     overwritten_data_path='/data/ssd/public/jlliu/frustum-pointnets/avod_prop/frustum_carpedcyc_train%s.pickle'%FLAGS.pickle,
 #     rotate_to_center=True, random_flip=True, random_shift=True, extra_feature=True)
