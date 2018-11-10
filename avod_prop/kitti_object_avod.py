@@ -135,14 +135,15 @@ class kitti_object_avod(kitti_object):
         calib = self.get_calibration(idx)
         for obj in proposal_objs:
             _, corners = utils.compute_box_3d(obj, calib.P)
-            corners_velo = calib.project_rect_to_velo(corners)
-            boxes.append(corners_velo)
+            # corners_velo = calib.project_rect_to_velo(corners)
+            # boxes.append(corners_velo)
+            boxes.append(corners)
             box_scores.append(obj.score)
-
-        bev_boxes = list(map(lambda bs: [bs[0][1][0], bs[0][1][1], bs[0][3][0], bs[0][3][1], bs[1]], zip(boxes, box_scores)))
+        bev_boxes = list(map(lambda bs: [np.amin(bs[0],axis=0)[0], np.amin(bs[0], axis=0)[2], np.amax(bs[0], axis=0)[0], np.amax(bs[0], axis=0)[2], bs[1]], zip(boxes, box_scores)))
+        # bev_boxes = list(map(lambda bs: [bs[0][1][0], bs[0][1][1], bs[0][3][0], bs[0][3][1], bs[1]], zip(boxes, box_scores)))
         bev_boxes = np.array(bev_boxes)
-        print('before nms: {0}'.format(len(bev_boxes)))
+        # print('before nms: {0}'.format(len(bev_boxes)))
         nms_idxs = non_max_suppression(bev_boxes, nms_iou_thres)
-        print('after nms: {0}'.format(len(nms_idxs)))
+        # print('after nms: {0}'.format(len(nms_idxs)))
         # boxes = [boxes[i] for i in nms_idxs]
         return [proposal_objs[i] for i in nms_idxs]

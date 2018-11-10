@@ -33,6 +33,31 @@ def random_shift_box3d(obj, shift_ratio=0.1):
     # obj.h = obj.h*(1+np.random.random()*2*r-r)
     return obj
 
+def is_near(prop1, prop2):
+    c1 = np.array(prop1.t)
+    c2 = np.array(prop2.t)
+    r = max(prop1.w, prop1.l, prop1.h, prop2.w, prop2.l, prop2.h)
+    return np.linalg.norm(c1-c2) < r / 2.0
+
+class Sample(object):
+    idx_counter = 0
+    def __init__(self, point_set, seg, box3d_center, angle_class, angle_residual,\
+        size_class, size_residual, rot_angle, cls_label, proposal):
+        self.idx = Sample.idx_counter
+        Sample.idx_counter += 1
+        self.point_set = point_set
+        self.seg_label = seg
+        self.box3d_center = box3d_center
+        self.angle_class = angle_class
+        self.angle_residual = angle_residual
+        self.size_class = size_class
+        self.size_residual = size_residual
+        self.rot_angle = rot_angle
+        self.cls_label = cls_label
+        self.feature_vec = proposal.roi_features
+        # corresponding proposal
+        self.proposal = proposal
+
 class AvodDataset(object):
     def __init__(self, npoints, kitti_path, batch_size, split,
                  random_flip=False, random_shift=False, rotate_to_center=False):
@@ -55,6 +80,11 @@ class AvodDataset(object):
         self.batch_size = batch_size
         self.augmentX = 1
 
+        self.all_samples = []
+        self.available_sample_idxs = []
+        self.frame_pos_sample_idxs = {} # frame_id to sample id list
+        self.frame_neg_sample_idxs = {}
+
         self.box3d_list = []
         self.input_list = []
         self.label_list = []
@@ -71,22 +101,36 @@ class AvodDataset(object):
     def is_all_loaded(self):
         return self.load_progress >= len(self.frame_ids)
 
-    def shuffle_samples(self):
-        '''shuffle on frames'''
+    def resample_and_shuffle(self):
+        '''shuffle on frames, resample'''
         random.shuffle(self.frame_ids)
+        self.available_sample_idxs = []
+        pos_count = 0
+        neg_count = 0
+        for frame_id in self.frame_ids:
+            use_idxs, count = self.sample_frame_pos_neg(
+                self.frame_pos_sample_idxs[frame_id],
+                self.frame_neg_sample_idxs[frame_id]
+            )
+            self.available_sample_idxs += use_idxs
+            pos_count += count['pos']
+            neg_count += count['neg']
+        print('resampling finished, pos: {} neg:{}'.format(pos_count, neg_count))
 
     def get_next_batch(self):
+        if self.is_all_loaded() and self.cur_batch == -1:
+            # from second epoch, resample
+            self.resample_and_shuffle()
         is_last_batch = False
         self.cur_batch += 1
         start = self.cur_batch * self.batch_size
         end = start + self.batch_size
-        while end > len(self.input_list) and not self.is_all_loaded():
+        while end > len(self.available_sample_idxs) and not self.is_all_loaded():
             self.load_frame_data()
-        if end >= len(self.input_list) and self.is_all_loaded():
+        if end >= len(self.available_sample_idxs) and self.is_all_loaded():
             # reach end
-            end = len(self.input_list)
+            end = len(self.available_sample_idxs)
             self.cur_batch = -1
-            self.shuffle_samples()
             is_last_batch = True
         bsize = end - start
         batch_data = np.zeros((bsize, self.npoints, self.num_channel))
@@ -98,63 +142,58 @@ class AvodDataset(object):
         batch_size_class = np.zeros((bsize,), dtype=np.int32)
         batch_size_residual = np.zeros((bsize, 3))
         batch_rot_angle = np.zeros((bsize,))
-        batch_feature_vec = np.zeros((bsize, self.roi_feature_list[0].shape[0]))
+        batch_feature_vec = np.zeros((bsize, self.all_samples[0].feature_vec.shape[0]))
         for i in range(bsize):
-            ps,seg,center,hclass,hres,sclass,sres,rotangle,cls_label,feature_vec = \
-                self.get_one_sample(i+start)
-            batch_data[i,...] = ps[:,0:self.num_channel]
-            batch_cls_label[i] = cls_label
-            batch_label[i,:] = seg
-            batch_center[i,:] = center
-            batch_heading_class[i] = hclass
-            batch_heading_residual[i] = hres
-            batch_size_class[i] = sclass
-            batch_size_residual[i] = sres
-            batch_rot_angle[i] = rotangle
-            batch_feature_vec[i] = feature_vec
+            sample = self.all_samples[self.available_sample_idxs[i+start]]
+            batch_data[i,...] = sample.point_set[:,0:self.num_channel]
+            batch_cls_label[i] = sample.cls_label
+            batch_label[i,:] = sample.seg_label
+            batch_center[i,:] = sample.box3d_center
+            batch_heading_class[i] = sample.angle_class
+            batch_heading_residual[i] = sample.angle_residual
+            batch_size_class[i] = sample.size_class
+            batch_size_residual[i] = sample.size_residual
+            batch_rot_angle[i] = sample.rot_angle
+            batch_feature_vec[i] = sample.feature_vec
         return batch_data, batch_cls_label, batch_label, batch_center, \
             batch_heading_class, batch_heading_residual, \
             batch_size_class, batch_size_residual, \
             batch_rot_angle, batch_feature_vec, is_last_batch
 
-    def get_center_view_rot_angle(self, index):
+    def get_center_view_rot_angle(self, frustum_angle):
         ''' Get the frustum rotation angle, it isshifted by pi/2 so that it
         can be directly used to adjust GT heading angle '''
-        return np.pi/2.0 + self.frustum_angle_list[index]
+        return np.pi/2.0 + frustum_angle
 
-    def get_center_view_point_set(self, index):
+    def get_center_view_point_set(self, points, rot_angle):
         ''' Frustum rotation of point clouds.
         NxC points with first 3 channels as XYZ
         z is facing forward, x is left ward, y is downward
         '''
         # Use np.copy to avoid corrupting original data
-        point_set = np.copy(self.input_list[index])
-        return rotate_pc_along_y(point_set, \
-            self.get_center_view_rot_angle(index))
+        point_set = np.copy(points)
+        return rotate_pc_along_y(point_set, rot_angle)
 
-    def get_center_view_box3d_center(self, index):
+    def get_center_view_box3d_center(self, box3d, rot_angle):
         ''' Frustum rotation of 3D bounding box center. '''
-        box3d_center = (self.box3d_list[index][0,:] + \
-            self.box3d_list[index][6,:])/2.0
-        return rotate_pc_along_y(np.expand_dims(box3d_center,0), \
-            self.get_center_view_rot_angle(index)).squeeze()
+        box3d_center = (box3d[0,:] + box3d[6,:])/2.0
+        return rotate_pc_along_y(np.expand_dims(box3d_center,0), rot_angle).squeeze()
 
-    def get_box3d_center(self, index):
+    def get_box3d_center(self, box3d):
         ''' Get the center (XYZ) of 3D bounding box. '''
-        box3d_center = (self.box3d_list[index][0,:] + \
-            self.box3d_list[index][6,:])/2.0
+        box3d_center = (box3d[0,:] + box3d[6,:])/2.0
         return box3d_center
 
-    def get_one_sample(self, index):
-        rot_angle = self.get_center_view_rot_angle(index)
-
-        feature_vec = self.roi_feature_list[index]
+    def get_one_sample(self, gt_box_3d, pc, seg, cls_type, heading_angle, \
+        box3d_size, frustum_angle, proposal):
+        '''convert to frustum sample format'''
+        rot_angle = self.get_center_view_rot_angle(frustum_angle)
 
         # Get point cloud
         if self.rotate_to_center:
-            point_set = self.get_center_view_point_set(index)
+            point_set = self.get_center_view_point_set(pc, rot_angle)
         else:
-            point_set = self.input_list[index]
+            point_set = pc
         # empty point set
         if point_set.shape[0] == 0:
             point_set = np.array([[0.0, 0.0, 0.0, 0.0]])
@@ -164,30 +203,25 @@ class AvodDataset(object):
 
         # ------------------------------ LABELS ----------------------------
         # classification
-        cls_type = self.type_list[index]
         assert(cls_type in ['Car', 'Pedestrian', 'Cyclist', 'NonObject'])
         cls_label = g_type2onehotclass[cls_type]
 
-        seg = self.label_list[index]
         if seg.shape[0] == 0:
             seg = np.array([0])
         seg = seg[choice]
 
         # Get center point of 3D box
         if self.rotate_to_center:
-            box3d_center = self.get_center_view_box3d_center(index)
+            box3d_center = self.get_center_view_box3d_center(gt_box_3d, rot_angle)
         else:
-            box3d_center = self.get_box3d_center(index)
+            box3d_center = self.get_box3d_center(gt_box_3d)
 
         # Heading
         if self.rotate_to_center:
-            heading_angle = self.heading_list[index] - rot_angle
-        else:
-            heading_angle = self.heading_list[index]
+            heading_angle = heading_angle - rot_angle
 
         # Size
-        size_class, size_residual = size2class(self.box3d_size_list[index],
-            self.type_list[index])
+        size_class, size_residual = size2class(box3d_size, cls_type)
 
         # Data Augmentation
         # if self.random_flip:
@@ -206,12 +240,42 @@ class AvodDataset(object):
         angle_class, angle_residual = angle2class(heading_angle,
             NUM_HEADING_BIN)
 
-        return point_set, seg, box3d_center, angle_class, angle_residual,\
-            size_class, size_residual, rot_angle, cls_label, feature_vec
+        return Sample(point_set, seg, box3d_center, angle_class, angle_residual,\
+            size_class, size_residual, rot_angle, cls_label, proposal)
 
+    def sample_frame_pos_neg(self, pos_idxs, neg_idxs):
+        '''strategy for pos/neg sampling in one frame'''
+        pos_samples = [self.all_samples[i] for i in pos_idxs]
+        neg_samples = [self.all_samples[i] for i in neg_idxs]
+        need_overlap_neg = 2 # need how many overlap neg for each pos
+        neg_pos_ratio = 3
+        need_neg = len(pos_samples) * neg_pos_ratio
+        keep_idxs = []
+        neg_count = 0
+        for pos in pos_samples:
+            # keep all pos
+            keep_idxs.append(pos.idx)
+            overlap_count = 0
+            for neg in neg_samples:
+                if is_near(pos.proposal, neg.proposal):
+                    keep_idxs.append(neg.idx)
+                    overlap_count += 1
+                    neg_count += 1
+                if overlap_count >= need_overlap_neg:
+                    break
+        # randomly fill the rest negative samples
+        remainings_neg = [neg_i for neg_i in neg_idxs if neg_i not in keep_idxs]
+        random.shuffle(remainings_neg)
+        keep_idxs += remainings_neg[:max(0, need_neg-neg_count)]
+        count = {'pos': len(pos_samples), 'neg': len(keep_idxs) - len(pos_samples)}
+        return keep_idxs, count
 
     def load_frame_data(self):
-        data_idx = int(self.frame_ids[self.load_progress])
+        '''load data for the first time'''
+        if self.is_all_loaded():
+            return
+        data_idx_str = self.frame_ids[self.load_progress]
+        data_idx = int(data_idx_str)
         print(data_idx)
         calib = self.kitti_dataset.get_calibration(data_idx) # 3 by 4 matrix
         objects = self.kitti_dataset.get_label_objects(data_idx)
@@ -227,6 +291,9 @@ class AvodDataset(object):
             _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
             gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
             gt_boxes_3d.append(gt_corners_3d)
+
+        self.frame_pos_sample_idxs[data_idx_str] = []
+        self.frame_neg_sample_idxs[data_idx_str] = []
         for prop_ in proposals:
             prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
             if prop_corners_image_2d is None:
@@ -259,14 +326,10 @@ class AvodDataset(object):
                 np.random.shuffle(pc_in_prop_box)
                 label = np.zeros((pc_in_prop_box.shape[0]))
 
-                self.box3d_list.append(gt_box_3d)
-                self.input_list.append(pc_in_prop_box)
-                self.label_list.append(label)
-                self.type_list.append(obj_type)
-                self.heading_list.append(heading_angle)
-                self.box3d_size_list.append(box3d_size)
-                self.frustum_angle_list.append(frustum_angle)
-                self.roi_feature_list.append(prop_.roi_features)
+                sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
+                    box3d_size, frustum_angle, prop_)
+                self.all_samples.append(sample)
+                self.frame_neg_sample_idxs[data_idx_str].append(sample.idx)
             else:
                 # only do augmentation on objects
                 for _ in range(self.augmentX):
@@ -323,14 +386,12 @@ class AvodDataset(object):
                     frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                         box2d_center_rect[0,0])
 
-                    self.box3d_list.append(gt_box_3d)
-                    self.input_list.append(pc_in_prop_box)
-                    self.label_list.append(label)
-                    self.type_list.append(obj_type)
-                    self.heading_list.append(heading_angle)
-                    self.box3d_size_list.append(box3d_size)
-                    self.frustum_angle_list.append(frustum_angle)
-                    self.roi_feature_list.append(prop_.roi_features)
+                    sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
+                        box3d_size, frustum_angle, prop_)
+                    self.all_samples.append(sample)
+                    self.frame_pos_sample_idxs[data_idx_str].append(sample.idx)
+        use_idxs, _ = self.sample_frame_pos_neg(self.frame_pos_sample_idxs[data_idx_str], self.frame_neg_sample_idxs[data_idx_str])
+        self.available_sample_idxs += use_idxs
         self.load_progress += 1
 
     def find_match_label(self, prop_corners, labels_corners, iou_threshold=0.5):
@@ -359,6 +420,16 @@ if __name__ == '__main__':
     kitti_path = sys.argv[1]
     dataset = AvodDataset(512, kitti_path, 16, 'train',
                  random_flip=True, random_shift=True, rotate_to_center=True)
+    import time
+    start = time.time()
     while(True):
-        if dataset.get_next_batch()[-1]:
+        batch = dataset.get_next_batch()
+        print(batch[1])
+        if batch[-1]:
             break
+    while(True):
+        batch = dataset.get_next_batch()
+        print(batch[1])
+        if batch[-1]:
+            break
+    print(time.time() - start)
