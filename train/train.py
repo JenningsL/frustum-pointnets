@@ -308,6 +308,10 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
         batch_sclass, batch_sres, \
         batch_rot_angle, batch_feature_vec, is_last_batch = TRAIN_DATASET.get_next_batch()
 
+        if is_last_batch and len(batch_data) != BATCH_SIZE:
+            # discard last batch with fewer data
+            break
+
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
                      ops['cls_label_pl']: batch_cls_label,
@@ -405,6 +409,11 @@ def eval_one_epoch(sess, ops, test_writer):
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
         batch_rot_angle, batch_feature_vec, is_last_batch = TEST_DATASET.get_next_batch()
+
+        if is_last_batch and len(batch_data) != BATCH_SIZE:
+            # discard last batch with fewer data
+            break
+            
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
                      ops['cls_label_pl']: batch_cls_label,

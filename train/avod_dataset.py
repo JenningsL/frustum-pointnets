@@ -4,6 +4,7 @@ import os
 import sys
 import numpy as np
 import copy
+import random
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'kitti'))
@@ -70,6 +71,10 @@ class AvodDataset(object):
     def is_all_loaded(self):
         return self.load_progress >= len(self.frame_ids)
 
+    def shuffle_samples(self):
+        '''shuffle on frames'''
+        random.shuffle(self.frame_ids)
+
     def get_next_batch(self):
         is_last_batch = False
         self.cur_batch += 1
@@ -81,6 +86,7 @@ class AvodDataset(object):
             # reach end
             end = len(self.input_list)
             self.cur_batch = -1
+            self.shuffle_samples()
             is_last_batch = True
         bsize = end - start
         batch_data = np.zeros((bsize, self.npoints, self.num_channel))
