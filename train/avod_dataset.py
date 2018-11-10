@@ -39,11 +39,9 @@ def is_near(prop1, prop2):
     return np.linalg.norm(c1-c2) < r / 2.0
 
 class Sample(object):
-    idx_counter = 0
-    def __init__(self, point_set, seg, box3d_center, angle_class, angle_residual,\
+    def __init__(self, idx, point_set, seg, box3d_center, angle_class, angle_residual,\
         size_class, size_residual, rot_angle, cls_label, proposal):
-        self.idx = Sample.idx_counter
-        Sample.idx_counter += 1
+        self.idx = idx
         self.point_set = point_set
         self.seg_label = seg
         self.box3d_center = box3d_center
@@ -232,7 +230,7 @@ class AvodDataset(object):
         angle_class, angle_residual = angle2class(heading_angle,
             NUM_HEADING_BIN)
 
-        return Sample(point_set, seg, box3d_center, angle_class, angle_residual,\
+        return Sample(len(self.all_samples), point_set, seg, box3d_center, angle_class, angle_residual,\
             size_class, size_residual, rot_angle, cls_label, proposal)
 
     def sample_frame_pos_neg(self, pos_idxs, neg_idxs):
@@ -412,6 +410,8 @@ if __name__ == '__main__':
     kitti_path = sys.argv[1]
     dataset = AvodDataset(512, kitti_path, 16, 'train',
                  augmentX=2, random_shift=True, rotate_to_center=True)
+    dataset1 = AvodDataset(512, kitti_path, 16, 'train',
+                 augmentX=2, random_shift=True, rotate_to_center=True)
     import time
     start = time.time()
     while(True):
@@ -420,7 +420,7 @@ if __name__ == '__main__':
         if batch[-1]:
             break
     while(True):
-        batch = dataset.get_next_batch()
+        batch = dataset1.get_next_batch()
         print(batch[1])
         if batch[-1]:
             break
