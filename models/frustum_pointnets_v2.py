@@ -174,7 +174,7 @@ def get_model(point_cloud, cls_label, feature_vec, is_training, bn_decay=None):
 
     # Amodel Box Estimation PointNet
     output, end_points = get_3d_box_estimation_v2_net(\
-        object_point_cloud_xyz_new, end_points['one_hot_vec'], feature_vec
+        object_point_cloud_xyz_new, end_points['one_hot_vec'], feature_vec,
         is_training, bn_decay, end_points)
 
     # Parse output to 3D box parameters
