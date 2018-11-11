@@ -85,14 +85,15 @@ def get_instance_seg_v2_net(point_cloud, feature_vec, cls_label,
 
     return logits, end_points
 
-def get_3d_box_estimation_v2_net(object_point_cloud, feature_vec,
+def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec, feature_vec,
                                  is_training, bn_decay, end_points):
     ''' 3D Box Estimation PointNet v2 network.
     Input:
         object_point_cloud: TF tensor in shape (B,M,C)
             masked point clouds in object coordinate
-        feature_vec: TF tensor in shape (B,3)
+        one_hot_vec: TF tensor in shape (B,3)
             length-3 vectors indicating predicted object type
+        feature_vec: ROI feature crop
     Output:
         output: TF tensor in shape (B,3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4)
             including box centers, heading bin class scores and residuals,
@@ -119,7 +120,7 @@ def get_3d_box_estimation_v2_net(object_point_cloud, feature_vec,
 
     # Fully connected layers
     net = tf.reshape(l3_points, [batch_size, -1])
-    net = tf.concat([net, feature_vec], axis=1)
+    net = tf.concat([net, one_hot_vec, feature_vec], axis=1)
     net = tf_util.fully_connected(net, 512, bn=True,
         is_training=is_training, scope='fc1', bn_decay=bn_decay)
     net = tf_util.fully_connected(net, 256, bn=True,
@@ -173,7 +174,7 @@ def get_model(point_cloud, cls_label, feature_vec, is_training, bn_decay=None):
 
     # Amodel Box Estimation PointNet
     output, end_points = get_3d_box_estimation_v2_net(\
-        object_point_cloud_xyz_new, end_points['one_hot_vec'],
+        object_point_cloud_xyz_new, end_points['one_hot_vec'], feature_vec
         is_training, bn_decay, end_points)
 
     # Parse output to 3D box parameters
