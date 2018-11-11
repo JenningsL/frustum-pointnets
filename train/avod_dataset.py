@@ -6,11 +6,13 @@ import numpy as np
 import copy
 import random
 import threading
+import time
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'kitti'))
 sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
+sys.path.append(os.path.join(ROOT_DIR, 'mayavi'))
 from prepare_data import extract_pc_in_box3d
 from kitti_object_avod import *
 import kitti_util as utils
@@ -124,6 +126,9 @@ class AvodDataset(object):
         self.cur_batch += 1
         start = self.cur_batch * self.batch_size
         end = start + self.batch_size
+        # need this when load in background thread
+        #while end > len(self.available_sample_idxs):
+        #    pass
         while end > len(self.available_sample_idxs) and not self.is_all_loaded():
             self.load_frame_data()
         if end >= len(self.available_sample_idxs) and self.is_all_loaded():
@@ -241,21 +246,21 @@ class AvodDataset(object):
         pos_samples = [self.all_samples[i] for i in pos_idxs]
         neg_samples = [self.all_samples[i] for i in neg_idxs]
         need_overlap_neg = 2 # need how many overlap neg for each pos
-        neg_pos_ratio = 3
+        neg_pos_ratio = 2
         need_neg = len(pos_samples) * neg_pos_ratio
         keep_idxs = []
         neg_count = 0
         for pos in pos_samples:
             # keep all pos
             keep_idxs.append(pos.idx)
-            overlap_count = 0
-            for neg in neg_samples:
-                if is_near(pos.proposal, neg.proposal):
-                    keep_idxs.append(neg.idx)
-                    overlap_count += 1
-                    neg_count += 1
-                if overlap_count >= need_overlap_neg:
-                    break
+            # overlap_count = 0
+            # for neg in neg_samples:
+            #     if is_near(pos.proposal, neg.proposal):
+            #         keep_idxs.append(neg.idx)
+            #         overlap_count += 1
+            #         neg_count += 1
+            #     if overlap_count >= need_overlap_neg:
+            #         break
         # randomly fill the rest negative samples
         remainings_neg = [neg_i for neg_i in neg_idxs if neg_i not in keep_idxs]
         random.shuffle(remainings_neg)
@@ -263,14 +268,43 @@ class AvodDataset(object):
         count = {'pos': len(pos_samples), 'neg': len(keep_idxs) - len(pos_samples)}
         return keep_idxs, count
 
+    def visualize_one_sample(self, pc_rect, pc_in_prop_box, gt_box_3d, prop_box_3d):
+        import mayavi.mlab as mlab
+        from viz_util import draw_lidar, draw_gt_boxes3d
+        # fig = draw_lidar(pc_rect)
+        fig = draw_lidar(pc_in_prop_box, pts_color=(1,1,1))
+        # fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
+        # fig = draw_gt_boxes3d([prop_box_3d], fig, draw_text=False, color=(1, 1, 1))
+        # roi_feature_map
+        # roi_features_size = 7 * 7 * 32
+        # img_roi_features = prop.roi_features[0:roi_features_size].reshape((7, 7, -1))
+        # bev_roi_features = prop.roi_features[roi_features_size:].reshape((7, 7, -1))
+        # img_roi_features = np.amax(img_roi_features, axis=-1)
+        # bev_roi_features = np.amax(bev_roi_features, axis=-1)
+        # fig1 = mlab.figure(figure=None, bgcolor=(0,0,0),
+        #     fgcolor=None, engine=None, size=(500, 500))
+        # fig2 = mlab.figure(figure=None, bgcolor=(0,0,0),
+        #     fgcolor=None, engine=None, size=(500, 500))
+        # mlab.imshow(img_roi_features, colormap='gist_earth', name='img_roi_features', figure=fig1)
+        # mlab.imshow(bev_roi_features, colormap='gist_earth', name='bev_roi_features', figure=fig2)
+        # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
+        raw_input()
+
+    def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes):
+        import mayavi.mlab as mlab
+        from viz_util import draw_lidar, draw_gt_boxes3d
+        fig = draw_lidar(pc_rect)
+        fig = draw_gt_boxes3d(prop_boxes, fig, draw_text=False, color=(1, 1, 1))
+        fig = draw_gt_boxes3d(neg_boxes, fig, draw_text=False, color=(0, 1, 0))
+        raw_input()
+
     def load_frame_data(self, data_idx_str):
         '''load data for the first time'''
         if self.is_all_loaded():
             return
-        # data_idx_str = self.frame_ids[self.load_progress]
         start = time.time()
         data_idx = int(data_idx_str)
-        # print(data_idx)
+        # print(data_idx_str)
         calib = self.kitti_dataset.get_calibration(data_idx) # 3 by 4 matrix
         objects = self.kitti_dataset.get_label_objects(data_idx)
         proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.1, nms_iou_thres=0.8)
@@ -365,7 +399,7 @@ class AvodDataset(object):
                     label[inds] = 1
                     # Reject object without points
                     if np.sum(label)==0:
-                        print('Reject object without points')
+                        # print('Reject object without points')
                         continue
                     # pos_proposals_in_frame.append(prop_corners_3d)
                     # Get 3D BOX heading
@@ -385,7 +419,7 @@ class AvodDataset(object):
 
                     # self.lock.acquire()
                     sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
-                        box3d_size, frustum_angle, prop_)
+                        box3d_size, frustum_angle, prop)
                     self.all_samples.append(sample)
                     # self.lock.release()
                     self.frame_pos_sample_idxs[data_idx_str].append(sample.idx)
@@ -394,7 +428,7 @@ class AvodDataset(object):
         self.available_sample_idxs += use_idxs
         # self.lock.release()
         self.load_progress += 1
-        # print('loading progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
+        print('loading progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
 
     def find_match_label(self, prop_corners, labels_corners, iou_threshold=0.5):
         '''
@@ -415,18 +449,16 @@ class AvodDataset(object):
             if iou > largest_iou:
                 largest_iou = iou
                 largest_idx = i
-        # print('largest_iou:', '<0.1' if largest_iou == 0.1 else largest_iou)
         return largest_idx, largest_iou
 
 if __name__ == '__main__':
+    import cPickle as pickle
     kitti_path = sys.argv[1]
-    dataset = AvodDataset(512, kitti_path, 16, 'train',
-                 augmentX=2, random_shift=True, rotate_to_center=True)
-    dataset1 = AvodDataset(512, kitti_path, 16, 'train',
-                 augmentX=2, random_shift=True, rotate_to_center=True)
-    import time
+    split = sys.argv[2]
+    dataset = AvodDataset(512, kitti_path, 16, split,
+                 augmentX=1, random_shift=False, rotate_to_center=True)
     dataset.preload()
-    pickle.dump(dataset, open('dataset.pkl', 'wb'))
+    pickle.dump(dataset, open(split+'set.pkl', 'wb'))
     # while(True):
     #     batch = dataset.get_next_batch()
     #     print(batch[1])
