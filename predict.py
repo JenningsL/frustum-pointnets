@@ -6,6 +6,7 @@ import numpy as np
 import pickle
 import math
 import time
+import traceback
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -53,8 +54,7 @@ class ProposalObject(object):
 
 batch_size = 32 # for PointNet
 num_point = 512
-NUM_CLASSES = 4
-from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER
+from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER, NUM_OBJ_CLASSES
 
 def rotate_pc_along_y(pc, rot_angle):
     '''
@@ -241,7 +241,7 @@ def softmax(x):
 
 def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
     sample_num = len(point_clouds)
-    logits = np.zeros((sample_num, NUM_CLASSES))
+    logits = np.zeros((sample_num, NUM_OBJ_CLASSES))
     centers = np.zeros((sample_num, 3))
     heading_logits = np.zeros((sample_num, NUM_HEADING_BIN))
     heading_residuals = np.zeros((sample_num, NUM_HEADING_BIN))
@@ -283,8 +283,8 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         heading_prob = np.max(softmax(batch_heading_scores),1) # B
         size_prob = np.max(softmax(batch_size_scores),1) # B,
         batch_scores = (batch_cls_prob + mask_mean_prob + heading_prob + size_prob) / 4
-        scores[begin:end] = batch_cls_prob
-        # scores[begin:end] = batch_scores
+        # scores[begin:end] = batch_cls_prob
+        scores[begin:end] = batch_scores
         # Finished computing scores
 
     type_cls = np.argmax(logits, 1)
@@ -297,7 +297,7 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
 
     output = []
     for i in range(sample_num):
-        if type_cls[i] == 3 or scores[i] < 0.5 or points_num[i] == 0:
+        if type_cls[i] == g_type2onehotclass['NonObject'] or scores[i] < 0.5 or points_num[i] == 0:
             # background or low confidence or no object point
             continue
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
@@ -446,7 +446,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         try:
             prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
         except:
-            print('exception')
+            traceback.print_exc()
             continue
 
         elapsed_time = time.time() - start_time
