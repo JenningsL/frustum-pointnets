@@ -18,8 +18,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
-from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES
-from avod_dataset import AvodDataset
+from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES, g_type2onehotclass
+from avod_dataset import AvodDataset, Sample
 import provider
 from train_util import get_batch
 
@@ -68,22 +68,26 @@ BN_DECAY_DECAY_RATE = 0.5
 BN_DECAY_DECAY_STEP = float(DECAY_STEP)
 BN_DECAY_CLIP = 0.99
 
-# Load Frustum Datasets. Use default data paths.
-TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
-             augmentX=2, random_shift=True, rotate_to_center=True)
-TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             augmentX=1, random_shift=False, rotate_to_center=True)
-
-data_loading_thread = Thread(target=load_data_in_background, args=(TRAIN_DATASET,))
-data_loading_thread.start()
-# TRAIN_DATASET.preload()
-# TEST_DATASET.preload()
-
 def load_data_in_background(train_set, test_set):
     train_set.preload()
     test_set.preload()
     pickle.dump(train_set, open('./train_set', 'wb'))
     pickle.dump(test_set, open('./test_set', 'wb'))
+
+# load data set in background thread, remember to join data_loading_thread somewhere
+'''
+TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
+             augmentX=2, random_shift=True, rotate_to_center=True)
+TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
+             augmentX=1, random_shift=False, rotate_to_center=True)
+#data_loading_thread = Thread(target=load_data_in_background, args=(TRAIN_DATASET,TEST_DATASET))
+#data_loading_thread.start()
+'''
+# load dataset from dumped files
+TRAIN_DATASET = pickle.load(open('/data/ssd/public/jlliu/frustum-pointnets/train/trainset.pkl', 'rb'))
+TEST_DATASET = pickle.load(open('/data/ssd/public/jlliu/frustum-pointnets/train/valset.pkl', 'rb'))
+TRAIN_DATASET.resample_and_shuffle()
+TEST_DATASET.resample_and_shuffle()
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -239,7 +243,6 @@ def train():
             else:
                 train_one_epoch(sess, ops, train_writer)
                 val_loss, avg_cls_acc = eval_one_epoch(sess, ops, test_writer)
-                data_loading_thread.join()
                 # Save the variables to disk.
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -345,7 +348,7 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
         total_cls_correct += cls_correct
         total_cls_seen += BATCH_SIZE
         # only calculate seg acc and regression performance with object labels
-        obj_mask = batch_cls_label < 3
+        obj_mask = batch_cls_label < g_type2onehotclass['NonObject']
         obj_sample_num = np.sum(obj_mask)
         total_obj_sample += obj_sample_num
         # segmentation acc
@@ -452,7 +455,7 @@ def eval_one_epoch(sess, ops, test_writer):
             total_correct_class[l] += (np.sum((cls_preds_val==l) & (batch_cls_label==l)))
 
         # only calculate seg acc and regression performance with object labels
-        obj_mask = batch_cls_label < 3
+        obj_mask = batch_cls_label < g_type2onehotclass['NonObject']
         obj_sample_num = np.sum(obj_mask)
         total_obj_sample += obj_sample_num
         # segmentation acc

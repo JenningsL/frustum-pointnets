@@ -14,15 +14,19 @@ NUM_SEG_CLASSES = 2 # segmentation has two classes
 # NUM_OBJ_CLASSES = 4 # classification
 NUM_OBJ_CLASSES = 2
 NUM_HEADING_BIN = 12
-NUM_SIZE_CLUSTER = 9 # one cluster for each type
+#NUM_SIZE_CLUSTER = 9 # one cluster for each type
 NUM_OBJECT_POINT = 512
 # type_whitelist = ['Car', 'Pedestrian', 'Cyclist', 'NonObject']
 type_whitelist = ['Car', 'NonObject']
+'''
 g_type2class={'Car':0, 'Van':1, 'Truck':2, 'Pedestrian':3,
               'Person_sitting':4, 'Cyclist':5, 'Tram':6, 'Misc':7, 'NonObject': 8}
+'''
+g_type2class={'Car':0, 'NonObject': 1}
 g_class2type = {g_type2class[t]:t for t in g_type2class}
 # g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2, 'NonObject': 3}
 g_type2onehotclass = {'Car': 0, 'NonObject': 1}
+'''
 g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
                     'Van': np.array([5.06763659,1.9007158,2.20532825]),
                     'Truck': np.array([10.13586957,2.58549199,3.2520595]),
@@ -32,6 +36,9 @@ g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462])
                     'Tram': np.array([16.17150617,2.53246914,3.53079012]),
                     'Misc': np.array([3.64300781,1.54298177,1.92320313]),
                     'NonObject': np.array([1.0, 1.0, 1.0])}
+'''
+g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462]), 'NonObject': np.array([1.0, 1.0, 1.0])}
+NUM_SIZE_CLUSTER = len(g_type_mean_size.keys())
 g_mean_size_arr = np.zeros((NUM_SIZE_CLUSTER, 3)) # size clustrs
 for i in range(NUM_SIZE_CLUSTER):
     g_mean_size_arr[i,:] = g_type_mean_size[g_class2type[i]]
@@ -409,7 +416,7 @@ def get_loss(cls_label, mask_label, center_label, \
     tf.summary.scalar('corners loss', corners_loss)
 
     # Weighted sum of all losses
-    total_loss = cls_loss*20 + mask_loss + box_loss_weight * (center_loss + \
+    total_loss = cls_loss + mask_loss + box_loss_weight * (center_loss + \
         heading_class_loss + size_class_loss + \
         heading_residual_normalized_loss*20 + \
         size_residual_normalized_loss*20 + \
