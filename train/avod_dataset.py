@@ -7,6 +7,7 @@ import copy
 import random
 import threading
 import time
+import cPickle as pickle
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'kitti'))
@@ -471,15 +472,13 @@ class AvodDataset(object):
         return largest_idx, largest_iou
 
 if __name__ == '__main__':
-    import cPickle as pickle
-    from threading import Thread
     kitti_path = sys.argv[1]
     split = sys.argv[2]
     dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset/'+split,
                  augmentX=1, random_shift=False, rotate_to_center=True)
     # dataset.preprocess()
 
-    produce_thread = Thread(target=dataset.load_buffer_repeatedly)
+    produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly)
     produce_thread.start()
 
     while(True):
