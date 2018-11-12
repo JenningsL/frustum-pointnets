@@ -68,26 +68,17 @@ BN_DECAY_DECAY_RATE = 0.5
 BN_DECAY_DECAY_STEP = float(DECAY_STEP)
 BN_DECAY_CLIP = 0.99
 
-def load_data_in_background(train_set, test_set):
-    train_set.preload()
-    test_set.preload()
-    pickle.dump(train_set, open('./train_set', 'wb'))
-    pickle.dump(test_set, open('./test_set', 'wb'))
-
 # load data set in background thread, remember to join data_loading_thread somewhere
-'''
 TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
-             augmentX=2, random_shift=True, rotate_to_center=True)
-TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/train',
              augmentX=1, random_shift=False, rotate_to_center=True)
-#data_loading_thread = Thread(target=load_data_in_background, args=(TRAIN_DATASET,TEST_DATASET))
-#data_loading_thread.start()
-'''
-# load dataset from dumped files
-TRAIN_DATASET = pickle.load(open('/data/ssd/public/jlliu/frustum-pointnets/train/trainset.pkl', 'rb'))
-TEST_DATASET = pickle.load(open('/data/ssd/public/jlliu/frustum-pointnets/train/valset.pkl', 'rb'))
-TRAIN_DATASET.resample_and_shuffle()
-TEST_DATASET.resample_and_shuffle()
+TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/val',
+             augmentX=1, random_shift=False, rotate_to_center=True)
+train_loading_thread = Thread(target=TRAIN_DATASET.load_buffer_repeatedly)
+val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly)
+train_loading_thread.start()
+val_loading_thread.start()
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -248,6 +239,8 @@ def train():
                     best_val_loss = val_loss
                     save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
                     log_string("Model saved in file: {0}, val_loss: {1}".format(save_path, val_loss))
+        train_loading_thread.stop()
+        val_loading_thread.stop()
 
 def get_hard_samples(sess, ops):
     is_training = True

@@ -144,17 +144,16 @@ class kitti_object_avod(kitti_object):
             # boxes.append(corners_velo)
             boxes.append(corners)
             box_scores.append(obj.score)
-        bev_boxes = list(map(lambda bs: [np.amin(bs[0],axis=0)[0], np.amin(bs[0], axis=0)[2], np.amax(bs[0], axis=0)[0], np.amax(bs[0], axis=0)[2], bs[1]], zip(boxes, box_scores)))
-        # bev_boxes = list(map(lambda bs: [bs[0][1][0], bs[0][1][1], bs[0][3][0], bs[0][3][1], bs[1]], zip(boxes, box_scores)))
-        bev_boxes = np.array(bev_boxes)
+        #bev_boxes = list(map(lambda bs: [np.amin(bs[0],axis=0)[0], np.amin(bs[0], axis=0)[2], np.amax(bs[0], axis=0)[0], np.amax(bs[0], axis=0)[2], bs[1]], zip(boxes, box_scores)))
+        #bev_boxes = np.array(bev_boxes)
         # print('before nms: {0}'.format(len(bev_boxes)))
-        nms_idxs = non_max_suppression(bev_boxes, nms_iou_thres)
+        #nms_idxs = non_max_suppression(bev_boxes, nms_iou_thres)
         # print('after nms: {0}'.format(len(nms_idxs)))
         # boxes = [boxes[i] for i in nms_idxs]
-        keep_idxs = keep_idxs[nms_idxs]
+        #keep_idxs = keep_idxs[nms_idxs]
         proposals_roi_features = self.np_read_lines(roi_file_path, keep_idxs)
         proposal_scores = proposal_scores[keep_idxs]
-        proposal_objs = [proposal_objs[i] for i in nms_idxs]
+        # proposal_objs = [proposal_objs[i] for i in nms_idxs]
         for obj, score, feat in zip(proposal_objs, proposal_scores, proposals_roi_features):
             obj.score = score
             obj.roi_features = feat

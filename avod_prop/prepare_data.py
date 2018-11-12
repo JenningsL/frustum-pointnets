@@ -165,10 +165,11 @@ def iou_2d(box1, box2):
     # compute the ratio of overlap
     return overlap / (area1 + area2 - overlap)
 
-def find_match_label(prop_corners, labels_corners, iou_threshold=0.5):
+def find_match_label(prop_corners, labels_corners, iou_threshold=0.65):
     '''
     Find label with largest IOU. Label boxes can be rotated in xy plane
     '''
+    # in avod paper, iou=0.65 for Car, iou=0.55 for Pedestrian and Cyclist
     # labels = MultiPolygon(labels_corners)
     labels = map(lambda corners: Polygon(corners), labels_corners)
     target = Polygon(prop_corners)
