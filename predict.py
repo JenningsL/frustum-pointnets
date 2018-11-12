@@ -41,6 +41,8 @@ BOX_COLOUR_SCHEME = {
     'Cyclist': '#FFFF00'        # Yellow
 }
 
+type_idx_whitelist = [g_type2onehotclass[t] for t in type_whitelist if t != 'NonObject']
+
 class ProposalObject(object):
     def __init__(self, box_3d, score=0.0, type='Car', roi_features=None):
         # [x, y, z, l, w, h, ry]
@@ -369,11 +371,15 @@ def visualize(dataset, sample, prediction):
     pred_corners = draw_boxes(prediction, sample, pred_3d_axes)
 
     # draw groundtruth on first image
+    obj_mask = np.zeros((len(sample[constants.KEY_LABEL_CLASSES]),), dtype=bool)
+    for i in range(obj_mask.shape[0]):
+        if sample[constants.KEY_LABEL_CLASSES][i] - 1 in type_idx_whitelist:
+            obj_mask[i] = True
     label_boxes = sample[constants.KEY_LABEL_BOXES_3D]
     label_classes = np.expand_dims(sample[constants.KEY_LABEL_CLASSES], axis=1).astype(int) - 1
     label_scores = np.ones((len(label_classes), 1))
     labels = np.concatenate((label_boxes, label_scores, label_classes), axis=1)
-    pred_corners = draw_boxes(labels, sample, pred_2d_axes)
+    pred_corners = draw_boxes(labels[obj_mask], sample, pred_2d_axes)
 
     # 3d visualization
     # import mayavi.mlab as mlab
