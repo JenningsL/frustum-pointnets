@@ -18,6 +18,7 @@ from avod.core import summary_utils
 from avod.core import trainer_utils
 from avod.core import constants
 from avod.core.models.rpn_model import RpnModel
+from avod.core.models.avod_model import AvodModel
 import avod.builders.config_builder_util as config_builder
 from avod.builders.dataset_builder import DatasetBuilder
 from avod.core import box_3d_projector
@@ -26,6 +27,7 @@ from wavedata.tools.visualization import vis_utils
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
+from model_util import g_type2onehotclass, type_whitelist
 import frustum_pointnets_v2
 sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
 from kitti_object_avod import non_max_suppression
@@ -33,7 +35,6 @@ from kitti_object_avod import non_max_suppression
 sys.path.append(os.path.join(ROOT_DIR, 'train'))
 import provider
 
-type_names = ['Car', 'Pedestrian', 'Cyclist', 'Background']
 BOX_COLOUR_SCHEME = {
     'Car': '#00FF00',           # Green
     'Pedestrian': '#00FFFF',    # Teal
@@ -74,7 +75,7 @@ def rotate_pc_along_y(pc, rot_angle):
 def get_proposal_network(model_config, dataset, model_path, GPU_INDEX=0):
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
-            rpn_model = RpnModel(model_config,
+            rpn_model = AvodModel(model_config,
                          train_val_test='test',
                          dataset=dataset)
             rpn_pred = rpn_model.build()
@@ -310,6 +311,8 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
         obj_type = type_cls[i]
         confidence = scores[i]
         output.append([tx,ty,tz,l,w,h,ry,confidence,obj_type])
+    if len(output) == 0:
+        return output
     # 2d nms on bev
     nms_idxs = nms_on_bev(output, 0.01)
     output = [output[i] for i in nms_idxs]
@@ -321,7 +324,7 @@ def draw_boxes(prediction, sample, plot_axes):
     for pred in prediction:
         box = np.array(pred[0:7])
         cls_idx = int(pred[8])
-        obj = box_3d_encoder.box_3d_to_object_label(box, obj_type=type_names[cls_idx])
+        obj = box_3d_encoder.box_3d_to_object_label(box, obj_type=type_whitelist[cls_idx])
         obj.score = pred[7]
 
         vis_utils.draw_box_3d(plot_axes, obj, sample[constants.KEY_STEREO_CALIB_P2],
@@ -458,7 +461,7 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         else:
             all_id_list = np.concatenate((all_id_list, id_list), axis=0)
         for pred in prediction:
-            obj = box_3d_encoder.box_3d_to_object_label(np.array(pred[0:7]), obj_type=type_names[pred[8]])
+            obj = box_3d_encoder.box_3d_to_object_label(np.array(pred[0:7]), obj_type=type_whitelist[pred[8]])
             corners = compute_box_3d(obj)
             projected = calib_utils.project_to_image(corners.T, sample[constants.KEY_STEREO_CALIB_P2])
             x1 = np.amin(projected[0])
@@ -481,7 +484,7 @@ def write_detection_results(result_dir, predictions, id_list, boxes_2d):
     for i in range(len(predictions)):
         idx = id_list[i]
         tx,ty,tz,l,w,h,ry,score,obj_type = predictions[i]
-        output_str = type_names[obj_type] + " -1 -1 -10 "
+        output_str = type_whitelist[obj_type] + " -1 -1 -10 "
         box2d = boxes_2d[i]
         output_str += "%f %f %f %f " % (box2d[0],box2d[1],box2d[2],box2d[3])
         output_str += "%f %f %f %f %f %f %f %f" % (h,w,l,tx,ty,tz,ry,score)
