@@ -118,7 +118,7 @@ class AvodDataset(object):
         neg_idxs = [i for i in range(0, len(samples)) if i not in pos_idxs]
         random.shuffle(neg_idxs)
         need_pos = int(pos_ratio * need_sample)
-        need_neg = int(max((1 - pos_ratio) * need_sample, need_sample - need_pos))
+        need_neg = int(max((1 - pos_ratio) * need_sample, need_sample - len(pos_idxs[:need_pos])))
         keep_idxs = pos_idxs[:need_pos] + neg_idxs[:need_neg]
         random.shuffle(keep_idxs)
         p = 0
