@@ -362,10 +362,11 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
             if total_seen > 0:
                 log_string('segmentation accuracy: %f' % \
                     (total_correct / float(total_seen)))
-            log_string('box IoU (ground/3D): %f / %f' % \
-                (iou2ds_sum / float(total_obj_sample), iou3ds_sum / float(total_obj_sample)))
-            log_string('box estimation accuracy (IoU=0.7): %f' % \
-                (float(iou3d_correct_cnt)/float(total_obj_sample)))
+            if total_obj_sample > 0:
+                log_string('box IoU (ground/3D): %f / %f' % \
+                    (iou2ds_sum / float(total_obj_sample), iou3ds_sum / float(total_obj_sample)))
+                log_string('box estimation accuracy (IoU=0.7): %f' % \
+                    (float(iou3d_correct_cnt)/float(total_obj_sample)))
             total_cls_correct = 0
             total_correct = 0
             total_cls_seen = 0
