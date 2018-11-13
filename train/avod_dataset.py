@@ -105,12 +105,23 @@ class AvodDataset(object):
 
     def preprocess(self):
         start = time.time()
+        npoints = 0
+        obj_points = 0
+        pos_count = 0
+        neg_count = 0
         for frame_id in self.frame_ids:
             frame_data = self.load_frame_data(frame_id)
             with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'wb') as f:
                 pickle.dump(frame_data, f)
             print('preprocess progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
+            for i in frame_data['pos_idxs']:
+                npoints += len(frame_data['samples'][i].seg_label)
+                obj_points += np.sum(frame_data['samples'][i].seg_label)
+            pos_count += len(frame_data['pos_idxs'])
+            neg_count += len(frame_data['samples']) - len(frame_data['pos_idxs'])
         print('preprocess done, cost time: {}'.format(time.time() - start))
+        print('pos: {}, neg: {}'.format(pos_count, neg_count))
+        print('Avg points: {}, pos_ratio: {}'.format(npoints/pos_count, obj_points/npoints))
 
     def do_sampling(self, frame_data, pos_ratio=0.5, need_sample=128):
         samples = frame_data['samples']
@@ -265,33 +276,6 @@ class AvodDataset(object):
         return Sample(self.sample_id_counter, point_set, seg, box3d_center, angle_class, angle_residual,\
             size_class, size_residual, rot_angle, cls_label, proposal)
 
-    def sample_frame_pos_neg(self, pos_idxs, neg_idxs):
-        '''strategy for pos/neg sampling in one frame'''
-        pos_samples = [self.all_samples[i] for i in pos_idxs]
-        neg_samples = [self.all_samples[i] for i in neg_idxs]
-        need_overlap_neg = 2 # need how many overlap neg for each pos
-        neg_pos_ratio = 2
-        need_neg = len(pos_samples) * neg_pos_ratio
-        keep_idxs = []
-        neg_count = 0
-        for pos in pos_samples:
-            # keep all pos
-            keep_idxs.append(pos.idx)
-            # overlap_count = 0
-            # for neg in neg_samples:
-            #     if is_near(pos.proposal, neg.proposal):
-            #         keep_idxs.append(neg.idx)
-            #         overlap_count += 1
-            #         neg_count += 1
-            #     if overlap_count >= need_overlap_neg:
-            #         break
-        # randomly fill the rest negative samples
-        remainings_neg = [neg_i for neg_i in neg_idxs if neg_i not in keep_idxs]
-        random.shuffle(remainings_neg)
-        keep_idxs += remainings_neg[:max(0, need_neg-neg_count)]
-        count = {'pos': len(pos_samples), 'neg': len(keep_idxs) - len(pos_samples)}
-        return keep_idxs, count
-
     def visualize_one_sample(self, pc_rect, pc_in_prop_box, gt_box_3d, prop_box_3d):
         import mayavi.mlab as mlab
         from viz_util import draw_lidar, draw_gt_boxes3d
@@ -332,7 +316,7 @@ class AvodDataset(object):
         # print(data_idx_str)
         calib = self.kitti_dataset.get_calibration(data_idx) # 3 by 4 matrix
         objects = self.kitti_dataset.get_label_objects(data_idx)
-        proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.1)
+        proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.5)
         pc_velo = self.kitti_dataset.get_lidar(data_idx)
         pc_rect = np.zeros_like(pc_velo)
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
@@ -347,6 +331,8 @@ class AvodDataset(object):
 
         samples = []
         pos_idxs = []
+        pos_box = []
+        neg_box = []
         for prop_ in proposals:
             prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
             if prop_corners_image_2d is None:
@@ -355,9 +341,9 @@ class AvodDataset(object):
 
             prop_box_xy = prop_corners_3d[:4, [0,2]]
             # find corresponding label object
-            obj_idx, iou_with_gt = self.find_match_label(prop_box_xy, gt_boxes_xy, 0.65)
+            obj_idx, iou_with_gt = self.find_match_label(prop_box_xy, gt_boxes_xy)
 
-            if obj_idx == -1:
+            if iou_with_gt < 0.3:
                 # non-object
                 obj_type = 'NonObject'
                 gt_box_3d = np.zeros((8, 3))
@@ -383,9 +369,9 @@ class AvodDataset(object):
                 sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
                     box3d_size, frustum_angle, prop_)
                 samples.append(sample)
-                # self.all_samples.append(sample)
+                neg_box.append(prop_corners_3d)
                 # self.lock.release()
-            else:
+            elif iou_with_gt >= 0.65:
                 # prop = copy.deepcopy(prop_)
                 # if self.random_shift:
                 #     prop = random_shift_box3d(prop)
@@ -444,20 +430,23 @@ class AvodDataset(object):
                     box3d_size, frustum_angle, prop_)
                 pos_idxs.append(len(samples))
                 samples.append(sample)
-                # self.all_samples.append(sample)
+                pos_box.append(prop_corners_3d)
                 # self.lock.release()
+            else:
+                continue
+        # self.visualize_proposals(pc_rect, pos_box, neg_box)
         self.load_progress += 1
         print('load {} samples, pos {}'.format(len(samples), len(pos_idxs)))
         return {'samples': samples, 'pos_idxs': pos_idxs}
 
-    def find_match_label(self, prop_corners, labels_corners, iou_threshold=0.5):
+    def find_match_label(self, prop_corners, labels_corners):
         '''
         Find label with largest IOU. Label boxes can be rotated in xy plane
         '''
         # labels = MultiPolygon(labels_corners)
         labels = map(lambda corners: Polygon(corners), labels_corners)
         target = Polygon(prop_corners)
-        largest_iou = iou_threshold
+        largest_iou = 0
         largest_idx = -1
         for i, label in enumerate(labels):
             area1 = label.area
@@ -476,17 +465,17 @@ if __name__ == '__main__':
     split = sys.argv[2]
     dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset/'+split,
                  augmentX=1, random_shift=False, rotate_to_center=True)
-    # dataset.preprocess()
+    dataset.preprocess()
 
-    produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly)
-    produce_thread.start()
-
-    while(True):
-        batch = dataset.get_next_batch()
-        is_last_batch = batch[-1]
-        print(batch[1])
-        if is_last_batch:
-            break
-    dataset.stop_loading()
-
-    produce_thread.join()
+    # produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly)
+    # produce_thread.start()
+    #
+    # while(True):
+    #     batch = dataset.get_next_batch()
+    #     is_last_batch = batch[-1]
+    #     print(batch[1])
+    #     if is_last_batch:
+    #         break
+    # dataset.stop_loading()
+    #
+    # produce_thread.join()
