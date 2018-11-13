@@ -45,8 +45,9 @@ def is_near(prop1, prop2):
 
 class Sample(object):
     def __init__(self, idx, point_set, seg, box3d_center, angle_class, angle_residual,\
-        size_class, size_residual, rot_angle, cls_label, proposal):
+        size_class, size_residual, rot_angle, cls_label, proposal, heading_angle):
         self.idx = idx
+        self.heading_angle = heading_angle
         self.point_set = point_set
         self.seg_label = seg
         self.box3d_center = box3d_center
@@ -60,11 +61,29 @@ class Sample(object):
         # corresponding proposal
         self.proposal = proposal
 
+    def random_flip(self):
+        if np.random.random()>0.5: # 50% chance flipping
+            self.point_set[:,0] *= -1
+            self.box3d_center[0] *= -1
+            self.heading_angle = np.pi - self.heading_angle
+
+        self.angle_class, self.angle_residual = angle2class(self.heading_angle,
+            NUM_HEADING_BIN)
+
+    def random_shift(self):
+        box3d_center = self.box3d_center
+        dist = np.sqrt(np.sum(box3d_center[0]**2+box3d_center[1]**2))
+        shift = np.clip(np.random.randn()*dist*0.05, dist*0.8, dist*1.2)
+        self.point_set[:,2] += shift
+        self.box3d_center[2] += shift
+
+
 class AvodDataset(object):
     def __init__(self, npoints, kitti_path, batch_size, split, save_dir,
-                 augmentX=1, random_shift=False, rotate_to_center=False):
+                 augmentX=1, random_shift=False, rotate_to_center=False, random_flip=False):
         self.npoints = npoints
         self.random_shift = random_shift
+        self.random_flip = random_flip
         self.rotate_to_center = rotate_to_center
         self.kitti_path = kitti_path
         self.kitti_dataset = kitti_object_avod(kitti_path, 'training')
@@ -89,11 +108,6 @@ class AvodDataset(object):
         self.sample_id_counter = -1 # as id for sample
         self.stop = False # stop loading thread
         self.last_sample_id = None
-
-        self.all_samples = []
-        self.available_sample_idxs = []
-        self.frame_pos_sample_idxs = {} # frame_id to sample id list
-        self.frame_neg_sample_idxs = {}
 
         self.sample_buffer = Queue(maxsize=5120)
 
@@ -141,8 +155,17 @@ class AvodDataset(object):
                 p += 1
             else:
                 n += 1
+        kept_samples = [samples[i] for i in keep_idxs]
+
+        # data augmentation
+        for sample in kept_samples:
+            if self.random_flip:
+                sample.random_flip()
+            if self.random_shift:
+                sample.random_shift()
+
         print('Sampling result: pos {}, neg {}'.format(p, n))
-        return [samples[i] for i in keep_idxs]
+        return kept_samples
 
     def stop_loading(self):
         self.stop = True
@@ -276,7 +299,7 @@ class AvodDataset(object):
 
         self.sample_id_counter += 1
         return Sample(self.sample_id_counter, point_set, seg, box3d_center, angle_class, angle_residual,\
-            size_class, size_residual, rot_angle, cls_label, proposal)
+            size_class, size_residual, rot_angle, cls_label, proposal, heading_angle)
 
     def visualize_one_sample(self, pc_rect, pc_in_prop_box, gt_box_3d, prop_box_3d):
         import mayavi.mlab as mlab
@@ -374,65 +397,65 @@ class AvodDataset(object):
                 neg_box.append(prop_corners_3d)
                 # self.lock.release()
             elif iou_with_gt >= 0.65:
-                # prop = copy.deepcopy(prop_)
-                # if self.random_shift:
-                #     prop = random_shift_box3d(prop)
-                prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
-                if prop_corners_image_2d is None:
-                    # print('skip proposal behind camera')
-                    continue
-                # get points within proposal box
-                # FIXME: sometimes this raise error
-                try:
-                    _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
-                except Exception as e:
-                    print(e)
-                    continue
+                for _ in range(self.augmentX):
+                    prop = copy.deepcopy(prop_)
+                    prop = random_shift_box3d(prop)
+                    prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+                    if prop_corners_image_2d is None:
+                        # print('skip proposal behind camera')
+                        continue
+                    # get points within proposal box
+                    # FIXME: sometimes this raise error
+                    try:
+                        _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+                    except Exception as e:
+                        print(e)
+                        continue
 
-                pc_in_prop_box = pc_rect[prop_inds,:]
-                # shuffle points order
-                np.random.shuffle(pc_in_prop_box)
-                # segmentation label
-                label = np.zeros((pc_in_prop_box.shape[0]))
+                    pc_in_prop_box = pc_rect[prop_inds,:]
+                    # shuffle points order
+                    np.random.shuffle(pc_in_prop_box)
+                    # segmentation label
+                    label = np.zeros((pc_in_prop_box.shape[0]))
 
-                obj = objects[obj_idx]
-                obj_type = obj.type
-                gt_box_3d = gt_boxes_3d[obj_idx]
+                    obj = objects[obj_idx]
+                    obj_type = obj.type
+                    gt_box_3d = gt_boxes_3d[obj_idx]
 
-                # FIXME: sometimes this raise error
-                try:
-                    _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
-                except Exception as e:
-                    print(e)
-                    continue
+                    # FIXME: sometimes this raise error
+                    try:
+                        _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
+                    except Exception as e:
+                        print(e)
+                        continue
 
-                label[inds] = 1
-                # Reject object without points
-                if np.sum(label)==0:
-                    # print('Reject object without points')
-                    continue
-                # pos_proposals_in_frame.append(prop_corners_3d)
-                # Get 3D BOX heading
-                heading_angle = obj.ry
-                # Get 3D BOX size
-                box3d_size = np.array([obj.l, obj.w, obj.h])
-                # Get frustum angle
-                xmin, ymin = prop_corners_image_2d.min(0)
-                xmax, ymax = prop_corners_image_2d.max(0)
-                box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
-                uvdepth = np.zeros((1,3))
-                uvdepth[0,0:2] = box2d_center
-                uvdepth[0,2] = 20 # some random depth
-                box2d_center_rect = calib.project_image_to_rect(uvdepth)
-                frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
-                    box2d_center_rect[0,0])
+                    label[inds] = 1
+                    # Reject object without points
+                    if np.sum(label)==0:
+                        # print('Reject object without points')
+                        continue
+                    # pos_proposals_in_frame.append(prop_corners_3d)
+                    # Get 3D BOX heading
+                    heading_angle = obj.ry
+                    # Get 3D BOX size
+                    box3d_size = np.array([obj.l, obj.w, obj.h])
+                    # Get frustum angle
+                    xmin, ymin = prop_corners_image_2d.min(0)
+                    xmax, ymax = prop_corners_image_2d.max(0)
+                    box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
+                    uvdepth = np.zeros((1,3))
+                    uvdepth[0,0:2] = box2d_center
+                    uvdepth[0,2] = 20 # some random depth
+                    box2d_center_rect = calib.project_image_to_rect(uvdepth)
+                    frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
+                        box2d_center_rect[0,0])
 
-                # self.lock.acquire()
-                sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
-                    box3d_size, frustum_angle, prop_)
-                pos_idxs.append(len(samples))
-                samples.append(sample)
-                pos_box.append(prop_corners_3d)
+                    # self.lock.acquire()
+                    sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
+                        box3d_size, frustum_angle, prop)
+                    pos_idxs.append(len(samples))
+                    samples.append(sample)
+                    pos_box.append(prop_corners_3d)
                 # self.lock.release()
             else:
                 continue
@@ -466,7 +489,7 @@ if __name__ == '__main__':
     kitti_path = sys.argv[1]
     split = sys.argv[2]
     dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset/'+split,
-                 augmentX=1, random_shift=False, rotate_to_center=True)
+                 augmentX=2, random_shift=True, rotate_to_center=True, random_flip=True)
     dataset.preprocess()
 
     # produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly)
