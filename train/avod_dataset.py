@@ -95,7 +95,7 @@ class AvodDataset(object):
         self.frame_pos_sample_idxs = {} # frame_id to sample id list
         self.frame_neg_sample_idxs = {}
 
-        self.sample_buffer = Queue(maxsize=1024)
+        self.sample_buffer = Queue(maxsize=5120)
 
         # self.lock = threading.Lock()
 
@@ -112,14 +112,16 @@ class AvodDataset(object):
             print('preprocess progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
         print('preprocess done, cost time: {}'.format(time.time() - start))
 
-    def do_sampling(self, frame_data, pos_ratio=0.5, need_sample=128):
+    def do_sampling(self, frame_data, pos_ratio=0.5, need_sample=64):
         samples = frame_data['samples']
         pos_idxs = frame_data['pos_idxs']
         neg_idxs = [i for i in range(0, len(samples)) if i not in pos_idxs]
         random.shuffle(neg_idxs)
         need_pos = int(pos_ratio * need_sample)
-        need_neg = int(max((1 - pos_ratio) * need_sample, need_sample - len(pos_idxs[:need_pos])))
-        keep_idxs = pos_idxs[:need_pos] + neg_idxs[:need_neg]
+        #need_neg = int(max((1 - pos_ratio) * need_sample, need_sample - len(pos_idxs[:need_pos])))
+        #keep_idxs = pos_idxs[:need_pos] + neg_idxs[:need_neg]
+        need_neg = max(len(pos_idxs), 1) # return at least one sample, otherwise may not have last sample id
+        keep_idxs = pos_idxs + neg_idxs[:need_neg]
         random.shuffle(keep_idxs)
         p = 0
         n = 0
