@@ -222,10 +222,10 @@ def train():
                 if FLAGS.restore_model_path is None:
                     raise Exception('must provide restore_model_path with hard_sample_mining')
                 if epoch == 0:
-                    _, best_avg_cls_acc = eval_one_epoch(sess, ops, test_writer)
+                    _, best_avg_cls_acc, _ = eval_one_epoch(sess, ops, test_writer)
                 hard_neg_idxs = get_hard_samples(sess, ops)
                 train_one_epoch(sess, ops, train_writer, hard_neg_idxs)
-                val_loss, avg_cls_acc = eval_one_epoch(sess, ops, test_writer)
+                val_loss, avg_cls_acc, _ = eval_one_epoch(sess, ops, test_writer)
                 # Save the variables to disk.
                 if avg_cls_acc > best_avg_cls_acc:
                     best_avg_cls_acc = avg_cls_acc
@@ -233,12 +233,14 @@ def train():
                     log_string("Model saved in file: {0}, avg_cls_acc: {1}".format(save_path, avg_cls_acc))
             else:
                 train_one_epoch(sess, ops, train_writer)
-                val_loss, avg_cls_acc = eval_one_epoch(sess, ops, test_writer)
+                val_loss, avg_cls_acc, estimate_acc = eval_one_epoch(sess, ops, test_writer)
                 # Save the variables to disk.
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
-                    log_string("Model saved in file: {0}, val_loss: {1}".format(save_path, val_loss))
+                # if val_loss < best_val_loss:
+                #     best_val_loss = val_loss
+                #     save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
+                #     log_string("Model saved in file: {0}, val_loss: {1}".format(save_path, val_loss))
+                save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
+                log_string("Model saved in file: {0}".format(save_path))
         train_loading_thread.stop()
         val_loading_thread.stop()
 
@@ -484,15 +486,17 @@ def eval_one_epoch(sess, ops, test_writer):
     avg_cls_acc = np.mean(np.array(total_correct_class) / \
         np.array(total_seen_class,dtype=np.float))
     log_string('eval classification avg class acc: %f' % avg_cls_acc)
-    log_string('eval box IoU (ground/3D): %f / %f' % \
-        (iou2ds_sum / float(total_obj_sample), iou3ds_sum / \
-            float(total_obj_sample)))
-    log_string('eval box estimation accuracy (IoU=0.7): %f' % \
-        (float(iou3d_correct_cnt)/float(total_obj_sample)))
-    box_estimation_acc = float(iou3d_correct_cnt)/float(total_obj_sample)
+    if total_obj_sample > 0:
+        log_string('eval box IoU (ground/3D): %f / %f' % \
+            (iou2ds_sum / float(total_obj_sample), iou3ds_sum / \
+                float(total_obj_sample)))
+        box_estimation_acc = float(iou3d_correct_cnt)/float(total_obj_sample)
+        log_string('eval box estimation accuracy (IoU=0.7): %f' % box_estimation_acc)
+    else:
+        box_estimation_acc = 0
     mean_loss = loss_sum / float(num_batches)
     EPOCH_CNT += 1
-    return mean_loss, avg_cls_acc
+    return mean_loss, avg_cls_acc, box_estimation_acc
 
 
 if __name__ == "__main__":
