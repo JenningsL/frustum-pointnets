@@ -123,10 +123,15 @@ class AvodDataset(object):
         obj_points = 0
         pos_count = 0
         neg_count = 0
+        recall = 0
+        has_obj_count = 0
         for frame_id in self.frame_ids:
             frame_data = self.load_frame_data(frame_id)
-            with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'wb') as f:
-                pickle.dump(frame_data, f)
+            if 'recall' in frame_data:
+                has_obj_count += 1
+                recall += frame_data['recall']
+            # with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'wb') as f:
+            #     pickle.dump(frame_data, f)
             print('preprocess progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
             for i in frame_data['pos_idxs']:
                 npoints += len(frame_data['samples'][i].seg_label)
@@ -135,9 +140,10 @@ class AvodDataset(object):
             neg_count += len(frame_data['samples']) - len(frame_data['pos_idxs'])
         print('preprocess done, cost time: {}'.format(time.time() - start))
         print('pos: {}, neg: {}'.format(pos_count, neg_count))
+        print('recall: {}'.format(recall/has_obj_count))
         print('Avg points: {}, pos_ratio: {}'.format(npoints/pos_count, obj_points/npoints))
 
-    def do_sampling(self, frame_data, pos_ratio=0.5, need_sample=64):
+    def do_sampling(self, frame_data, pos_ratio=0.5, need_sample=64, use_neg_only=False):
         samples = frame_data['samples']
         pos_idxs = frame_data['pos_idxs']
         neg_idxs = [i for i in range(0, len(samples)) if i not in pos_idxs]
@@ -145,8 +151,11 @@ class AvodDataset(object):
         need_pos = int(pos_ratio * need_sample)
         #need_neg = int(max((1 - pos_ratio) * need_sample, need_sample - len(pos_idxs[:need_pos])))
         #keep_idxs = pos_idxs[:need_pos] + neg_idxs[:need_neg]
-        need_neg = max(len(pos_idxs), 1) # return at least one sample, otherwise may not have last sample id
-        keep_idxs = pos_idxs + neg_idxs[:need_neg]
+        if use_neg_only:
+            keep_idxs = neg_idxs
+        else:
+            need_neg = max(len(pos_idxs), 1) # return at least one sample, otherwise may not have last sample id
+            keep_idxs = pos_idxs + neg_idxs[:need_neg]
         random.shuffle(keep_idxs)
         p = 0
         n = 0
@@ -170,13 +179,13 @@ class AvodDataset(object):
     def stop_loading(self):
         self.stop = True
 
-    def load_buffer_repeatedly(self):
+    def load_buffer_repeatedly(self, use_neg_only=False):
         i = -1
         while not self.stop:
             frame_id = self.frame_ids[i]
             with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'rb') as f:
                 frame_data = pickle.load(f)
-            samples = self.do_sampling(frame_data)
+            samples = self.do_sampling(frame_data, use_neg_only=use_neg_only)
             for s in samples:
                 self.sample_buffer.put(s)
             if i == len(self.frame_ids) - 1:
@@ -323,12 +332,13 @@ class AvodDataset(object):
         # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
         raw_input()
 
-    def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes):
+    def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes, gt_boxes):
         import mayavi.mlab as mlab
         from viz_util import draw_lidar, draw_gt_boxes3d
         fig = draw_lidar(pc_rect)
-        fig = draw_gt_boxes3d(prop_boxes, fig, draw_text=False, color=(1, 1, 1))
-        fig = draw_gt_boxes3d(neg_boxes, fig, draw_text=False, color=(0, 1, 0))
+        fig = draw_gt_boxes3d(prop_boxes, fig, draw_text=False, color=(1, 0, 0))
+        # fig = draw_gt_boxes3d(neg_boxes, fig, draw_text=False, color=(0, 1, 0))
+        fig = draw_gt_boxes3d(gt_boxes, fig, draw_text=False, color=(1, 1, 1))
         raw_input()
 
     def load_frame_data(self, data_idx_str):
@@ -353,6 +363,7 @@ class AvodDataset(object):
             _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
             gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
             gt_boxes_3d.append(gt_corners_3d)
+        recall = np.zeros((len(objects),))
 
         samples = []
         pos_idxs = []
@@ -397,6 +408,7 @@ class AvodDataset(object):
                 neg_box.append(prop_corners_3d)
                 # self.lock.release()
             elif iou_with_gt >= 0.65:
+                recall[obj_idx] = 1
                 for _ in range(self.augmentX):
                     prop = copy.deepcopy(prop_)
                     prop = random_shift_box3d(prop)
@@ -459,10 +471,13 @@ class AvodDataset(object):
                 # self.lock.release()
             else:
                 continue
-        # self.visualize_proposals(pc_rect, pos_box, neg_box)
+        # self.visualize_proposals(pc_rect, pos_box, neg_box, gt_boxes_3d)
         self.load_progress += 1
         print('load {} samples, pos {}'.format(len(samples), len(pos_idxs)))
-        return {'samples': samples, 'pos_idxs': pos_idxs}
+        if len(objects) > 0:
+            return {'samples': samples, 'pos_idxs': pos_idxs, 'recall': np.sum(recall)/len(objects)}
+        else:
+            return {'samples': samples, 'pos_idxs': pos_idxs}
 
     def find_match_label(self, prop_corners, labels_corners):
         '''
