@@ -239,7 +239,7 @@ def train():
                 #     best_val_loss = val_loss
                 #     save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
                 #     log_string("Model saved in file: {0}, val_loss: {1}".format(save_path, val_loss))
-                save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
+                save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt.%03d" % epoch))
                 log_string("Model saved in file: {0}".format(save_path))
         train_loading_thread.stop()
         val_loading_thread.stop()
