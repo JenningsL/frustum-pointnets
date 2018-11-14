@@ -250,7 +250,7 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
         # get groundtruth cls label for each proposal
         corners_bev = corners[:4, [0,2]]
         label_idx, iou = find_match_label(corners_bev, gt_boxes_bev)
-        if iou >= 0.65:
+        if iou >= 0.5:
             prop_cls_labels.append(gt_cls[label_idx] - 1)
         else:
             prop_cls_labels.append(g_type2onehotclass['NonObject'])
@@ -420,7 +420,7 @@ def visualize(dataset, sample, prediction):
     label_classes = np.expand_dims(sample[constants.KEY_LABEL_CLASSES], axis=1).astype(int) - 1
     label_scores = np.ones((len(label_classes), 1))
     labels = np.concatenate((label_boxes, label_scores, label_classes), axis=1)
-    pred_corners = draw_boxes(labels[obj_mask], sample, pred_2d_axes)
+    gt_corners = draw_boxes(labels[obj_mask], sample, pred_2d_axes)
 
     # 3d visualization
     # import mayavi.mlab as mlab
@@ -629,12 +629,24 @@ def test():
     print(gt_boxes_bev)
 
     rpn_out = pickle.load(open("rpn_out/%s" % sample[constants.KEY_SAMPLE_NAME], "rb"))
-    corners = compute_box_3d(box_3d_encoder.box_3d_to_object_label(rpn_out['proposals_and_scores'][0][:7]))
-    label_idx, iou = find_match_label(corners[:4, [0,2]], gt_boxes_bev)
-    print(label_idx, iou)
+    pos_prop = []
+    for prop in rpn_out['proposals_and_scores']:
+        corners = compute_box_3d(box_3d_encoder.box_3d_to_object_label(prop[:7]))
+        label_idx, iou = find_match_label(corners[:4, [0,2]], gt_boxes_bev)
+        if iou > 0.65:
+            pos_prop.append(corners)
+    pc = sample[constants.KEY_POINT_CLOUD].T
+    import mayavi.mlab as mlab
+    from viz_util import draw_lidar, draw_gt_boxes3d
+    fig = draw_lidar(pc)
+    fig = draw_gt_boxes3d(pos_prop, fig, draw_text=False, color=(1, 1, 1))
+    input()
+
     # visualize_rpn_out(sample, rpn_out['proposals_and_scores'])
-    # prediction = pickle.load(open("%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
-    # visualize(dataset, sample, prediction)
+    prediction = pickle.load(open("%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
+    print(prediction)
+    visualize(dataset, sample, prediction)
 
 if __name__ == '__main__':
     main()
+    # test()
