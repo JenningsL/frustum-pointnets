@@ -24,6 +24,7 @@ from avod.builders.dataset_builder import DatasetBuilder
 from avod.core import box_3d_projector
 from wavedata.tools.core import calib_utils
 from wavedata.tools.visualization import vis_utils
+from shapely.geometry import Polygon
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
@@ -189,6 +190,27 @@ def nms_on_bev(boxes_3d, iou_threshold=0.1):
     print('final output after nms: {0}'.format(len(nms_idxs)))
     return nms_idxs
 
+def find_match_label(prop_corners, labels_corners):
+    '''
+    Find label with largest IOU. Label boxes can be rotated in xy plane
+    '''
+    # labels = MultiPolygon(labels_corners)
+    labels = map(lambda corners: Polygon(corners), labels_corners)
+    target = Polygon(prop_corners)
+    largest_iou = 0
+    largest_idx = -1
+    for i, label in enumerate(labels):
+        area1 = label.area
+        area2 = target.area
+        intersection = target.intersection(label).area
+        iou = intersection / (area1 + area2 - intersection)
+        # print(area1, area2, intersection)
+        # print(iou)
+        if iou > largest_iou:
+            largest_iou = iou
+            largest_idx = i
+    return largest_idx, largest_iou
+
 def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_threshold=0.1):
     proposal_boxes_3d = proposals_and_scores[:, 0:7]
     proposal_scores = proposals_and_scores[:, 7]
@@ -201,6 +223,12 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     proposal_objs = list(map(lambda pair: ProposalObject(pair[0], pair[1], None, None), zip(proposal_boxes_3d, proposal_scores)))
     propsasl_corners = list(map(lambda obj: compute_box_3d(obj), proposal_objs))
 
+    # get groundtruth cls label
+    label_mask = sample[constants.KEY_LABEL_CLASSES] < g_type2onehotclass['NonObject'] + 1
+    gt_cls = sample[constants.KEY_LABEL_CLASSES][label_mask]
+    gt_boxes_3d = sample[constants.KEY_LABEL_BOXES_3D][label_mask]
+    gt_boxes_bev = gt_boxes_3d[:4, [0,2]]
+
     # point cloud of this frame
     pc = sample[constants.KEY_POINT_CLOUD].T
     frame_calib = sample[constants.KEY_STEREO_CALIB]
@@ -209,12 +237,19 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     point_clouds = []
     features = []
     rot_angle_list = []
+    prop_cls_labels = []
     for obj, corners, feat in zip(proposal_objs, propsasl_corners, roi_features):
-        #corners = calib_utils.lidar_to_cam_frame(corners, frame_calib)
         _, inds = extract_pc_in_box3d(pc, corners)
         if (np.any(inds) == False):
             # skip proposal with no points
             continue
+        # get groundtruth cls label for each proposal
+        corners_bev = corners[:4, [0,2]]
+        label_idx, iou = find_match_label(corners_bev, gt_boxes_bev)
+        if iou >= 0.65:
+            prop_cls_labels.append(gt_cls[label_idx] - 1)
+        else:
+            prop_cls_labels.append(g_type2onehotclass['NonObject'])
         # under rect coorination, x->right, y->down, z->front
         center_rect = (np.min(corners, axis=0) + np.max(corners, axis=0)) / 2
         # FIXME: here induces a 90 degrees offset when visualize, should be fix together with prepare_data.py
@@ -233,7 +268,7 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
         # fig = draw_gt_boxes3d([corners], fig, draw_text=False, color=(1, 1, 1))
         # mlab.plot3d([0, center_rect[0]], [0, center_rect[1]], [0, center_rect[2]], color=(1,1,1), tube_radius=None, figure=fig)
         # input()
-    return point_clouds, features, rot_angle_list
+    return point_clouds, features, rot_angle_list, prop_cls_labels
 
 def softmax(x):
     ''' Numpy function for softmax'''
@@ -242,7 +277,7 @@ def softmax(x):
     probs /= np.sum(probs, axis=len(shape)-1, keepdims=True)
     return probs
 
-def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
+def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list, prop_cls_labels):
     sample_num = len(point_clouds)
     logits = np.zeros((sample_num, NUM_OBJ_CLASSES))
     centers = np.zeros((sample_num, 3))
@@ -300,8 +335,10 @@ def detect_batch(sess, end_points, point_clouds, feature_vec, rot_angle_list):
 
     output = []
     for i in range(sample_num):
-        if type_cls[i] == g_type2onehotclass['NonObject'] or scores[i] < 0.5 or points_num[i] == 0:
-            # background or low confidence or no object point
+        # if type_cls[i] == g_type2onehotclass['NonObject'] or scores[i] < 0.5 or points_num[i] == 0:
+        # use ground as cls output
+        type_cls[i] = prop_cls_labels[i]
+        if type_cls[i] == g_type2onehotclass['NonObject']:
             continue
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(centers[i],
             heading_cls[i], heading_res[i],
@@ -443,17 +480,17 @@ def inference(rpn_model_path, detect_model_path, avod_config_path):
         top_bev_roi = np.reshape(top_bev_roi, (roi_num, -1))
         roi_features = np.column_stack((top_img_roi, top_bev_roi))
         '''
-        #pickle.dump({'proposals_and_scores': proposals_and_scores, 'roi_features': roi_features}, open("rpn_out", "wb"))
-        data_dump = pickle.load(open("rpn_out", "rb"))
-        proposals_and_scores = data_dump['proposals_and_scores']
-        roi_features = data_dump['roi_features']
-        kitti_samples = dataset.load_samples([0])
-        sample = kitti_samples[0]
+        # save proposal
+        if os.path.exists(os.path.join('/data/ssd/public/jlliu/Kitti/object/training/proposal', '%s.txt'%(sample[constants.KEY_SAMPLE_NAME]))):
+            continue
+        np.savetxt(os.path.join('./proposals_and_scores/', '%s.txt'%sample[constants.KEY_SAMPLE_NAME]), proposals_and_scores, fmt='%.3f')
+        np.savetxt(os.path.join('./roi_features/', '%s_roi.txt'%sample[constants.KEY_SAMPLE_NAME]), roi_features, fmt='%.5f')
+        print('save ' + sample[constants.KEY_SAMPLE_NAME])
         '''
         # run frustum_pointnets_v2
-        point_clouds, feature_vec, rot_angle_list = get_pointnet_input(sample, proposals_and_scores, roi_features)
+        point_clouds, feature_vec, rot_angle_list, prop_cls_labels = get_pointnet_input(sample, proposals_and_scores, roi_features)
         try:
-            prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list)
+            prediction = detect_batch(sess2, end_points, point_clouds, feature_vec, rot_angle_list, prop_cls_labels)
         except:
             traceback.print_exc()
             continue
