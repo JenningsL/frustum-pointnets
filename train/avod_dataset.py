@@ -80,7 +80,8 @@ class Sample(object):
 
 class AvodDataset(object):
     def __init__(self, npoints, kitti_path, batch_size, split, save_dir,
-                 augmentX=1, random_shift=False, rotate_to_center=False, random_flip=False):
+                 augmentX=1, random_shift=False, rotate_to_center=False, random_flip=False,
+                 perturb_prop=False):
         self.npoints = npoints
         self.random_shift = random_shift
         self.random_flip = random_flip
@@ -104,6 +105,7 @@ class AvodDataset(object):
         self.load_progress = 0
         self.batch_size = batch_size
         self.augmentX = augmentX
+        self.perturb_prop = perturb_prop
 
         self.sample_id_counter = -1 # as id for sample
         self.stop = False # stop loading thread
@@ -132,7 +134,7 @@ class AvodDataset(object):
                 has_obj_count += 1
                 recall += frame_data['recall']
             if 'avg_iou' in frame_data:
-                avg_iou.append(frame_data['avg_iou'])
+                avg_iou += frame_data['avg_iou']
             with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'wb') as f:
                 pickle.dump(frame_data, f)
             print('preprocess progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
@@ -147,19 +149,21 @@ class AvodDataset(object):
         print('Avg iou: {}'.format(np.mean(avg_iou)))
         print('Avg points: {}, pos_ratio: {}'.format(npoints/pos_count, obj_points/npoints))
 
-    def do_sampling(self, frame_data, pos_ratio=0.5, need_sample=64, use_neg_only=False):
+    def do_sampling(self, frame_data, pos_ratio=0.5):
         samples = frame_data['samples']
         pos_idxs = frame_data['pos_idxs']
         neg_idxs = [i for i in range(0, len(samples)) if i not in pos_idxs]
         random.shuffle(neg_idxs)
-        need_pos = int(pos_ratio * need_sample)
-        #need_neg = int(max((1 - pos_ratio) * need_sample, need_sample - len(pos_idxs[:need_pos])))
-        #keep_idxs = pos_idxs[:need_pos] + neg_idxs[:need_neg]
-        if use_neg_only:
+        if pos_ratio == 0.0:
             keep_idxs = neg_idxs
+        elif pos_ratio == 1.0:
+            keep_idxs = pos_idxs
         else:
-            need_neg = max(len(pos_idxs), 1) # return at least one sample, otherwise may not have last sample id
+            need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio))
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
+        # return at least one sample, otherwise may not have last sample id
+        if len(keep_idxs) == 0:
+            keep_idxs = neg_idxs[:1]
         random.shuffle(keep_idxs)
         p = 0
         n = 0
@@ -183,13 +187,13 @@ class AvodDataset(object):
     def stop_loading(self):
         self.stop = True
 
-    def load_buffer_repeatedly(self, use_neg_only=False):
+    def load_buffer_repeatedly(self, pos_ratio=0.5):
         i = -1
         while not self.stop:
             frame_id = self.frame_ids[i]
             with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'rb') as f:
                 frame_data = pickle.load(f)
-            samples = self.do_sampling(frame_data, use_neg_only=use_neg_only)
+            samples = self.do_sampling(frame_data, pos_ratio=pos_ratio)
             for s in samples:
                 self.sample_buffer.put(s)
             if i == len(self.frame_ids) - 1:
@@ -373,7 +377,7 @@ class AvodDataset(object):
         pos_idxs = []
         pos_box = []
         neg_box = []
-        avg_iou = 0.0
+        avg_iou = []
         for prop_ in proposals:
             prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
             if prop_corners_image_2d is None:
@@ -414,10 +418,11 @@ class AvodDataset(object):
                 # self.lock.release()
             elif iou_with_gt >= 0.5:
                 recall[obj_idx] = 1
-                avg_iou += iou_with_gt
+                avg_iou.append(iou_with_gt)
                 for _ in range(self.augmentX):
                     prop = copy.deepcopy(prop_)
-                    prop = random_shift_box3d(prop)
+                    if self.perturb_prop:
+                        prop = random_shift_box3d(prop)
                     prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
                     if prop_corners_image_2d is None:
                         # print('skip proposal behind camera')
@@ -484,7 +489,7 @@ class AvodDataset(object):
         if len(objects) > 0:
             ret['recall'] = np.sum(recall)/len(objects)
         if len(pos_idxs) > 0:
-            ret['avg_iou'] = avg_iou/len(pos_idxs)
+            ret['avg_iou'] = avg_iou
         return ret
 
     def find_match_label(self, prop_corners, labels_corners):
@@ -514,11 +519,17 @@ class AvodDataset(object):
 if __name__ == '__main__':
     kitti_path = sys.argv[1]
     split = sys.argv[2]
+    if split == 'train':
+        augmentX = 3
+        perturb_prop = True
+    else:
+        augmentX = 1
+        perturb_prop = False
     dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset/'+split,
-                 augmentX=2, random_shift=True, rotate_to_center=True, random_flip=True)
+                 augmentX=augmentX, random_shift=True, rotate_to_center=True, random_flip=True, perturb_prop=perturb_prop)
     dataset.preprocess()
 
-    # produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly)
+    # produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly, args=(1.0,))
     # produce_thread.start()
     #
     # while(True):

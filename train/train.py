@@ -38,7 +38,7 @@ parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate fo
 parser.add_argument('--no_intensity', action='store_true', help='Only use XYZ for training')
 parser.add_argument('--restore_model_path', default=None, help='Restore model path e.g. log/model.ckpt [default: None]')
 parser.add_argument('--hard_sample_mining', default=False, help='If train only with classification hard samples')
-parser.add_argument('--reduce_fp', type=int, default=0, help='Train classification with all neg')
+parser.add_argument('--pos_ratio', type=float, default=1.0, help='Positive proposal ratio')
 FLAGS = parser.parse_args()
 
 # Set training configurations
@@ -75,8 +75,8 @@ TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BA
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
-train_loading_thread = Thread(target=TRAIN_DATASET.load_buffer_repeatedly, args=(FLAGS.reduce_fp,))
-val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(FLAGS.reduce_fp,))
+train_loading_thread = Thread(target=TRAIN_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio,))
+val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio,))
 train_loading_thread.start()
 val_loading_thread.start()
 
