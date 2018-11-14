@@ -224,7 +224,7 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     propsasl_corners = list(map(lambda obj: compute_box_3d(obj), proposal_objs))
 
     # get groundtruth cls label
-    label_mask = sample[constants.KEY_LABEL_CLASSES] < g_type2onehotclass['NonObject'] + 1
+    label_mask = np.equal(sample[constants.KEY_LABEL_CLASSES], g_type2onehotclass['Car']+1)
     gt_cls = sample[constants.KEY_LABEL_CLASSES][label_mask]
     gt_boxes_3d = sample[constants.KEY_LABEL_BOXES_3D][label_mask]
     gt_boxes_bev = gt_boxes_3d[:4, [0,2]]
