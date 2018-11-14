@@ -133,8 +133,8 @@ class AvodDataset(object):
                 recall += frame_data['recall']
             if 'avg_iou' in frame_data:
                 avg_iou.append(frame_data['avg_iou'])
-            # with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'wb') as f:
-            #     pickle.dump(frame_data, f)
+            with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'wb') as f:
+                pickle.dump(frame_data, f)
             print('preprocess progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
             for i in frame_data['pos_idxs']:
                 npoints += len(frame_data['samples'][i].seg_label)
