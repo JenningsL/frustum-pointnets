@@ -125,11 +125,14 @@ class AvodDataset(object):
         neg_count = 0
         recall = 0
         has_obj_count = 0
+        avg_iou = []
         for frame_id in self.frame_ids:
             frame_data = self.load_frame_data(frame_id)
             if 'recall' in frame_data:
                 has_obj_count += 1
                 recall += frame_data['recall']
+            if 'avg_iou' in frame_data:
+                avg_iou.append(frame_data['avg_iou'])
             # with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'wb') as f:
             #     pickle.dump(frame_data, f)
             print('preprocess progress: {}/{}'.format(self.load_progress, len(self.frame_ids)))
@@ -141,6 +144,7 @@ class AvodDataset(object):
         print('preprocess done, cost time: {}'.format(time.time() - start))
         print('pos: {}, neg: {}'.format(pos_count, neg_count))
         print('recall: {}'.format(recall/has_obj_count))
+        print('Avg iou: {}'.format(np.mean(avg_iou)))
         print('Avg points: {}, pos_ratio: {}'.format(npoints/pos_count, obj_points/npoints))
 
     def do_sampling(self, frame_data, pos_ratio=0.5, need_sample=64, use_neg_only=False):
@@ -337,7 +341,7 @@ class AvodDataset(object):
         from viz_util import draw_lidar, draw_gt_boxes3d
         fig = draw_lidar(pc_rect)
         fig = draw_gt_boxes3d(prop_boxes, fig, draw_text=False, color=(1, 0, 0))
-        # fig = draw_gt_boxes3d(neg_boxes, fig, draw_text=False, color=(0, 1, 0))
+        fig = draw_gt_boxes3d(neg_boxes, fig, draw_text=False, color=(0, 1, 0))
         fig = draw_gt_boxes3d(gt_boxes, fig, draw_text=False, color=(1, 1, 1))
         raw_input()
 
@@ -351,7 +355,7 @@ class AvodDataset(object):
         # print(data_idx_str)
         calib = self.kitti_dataset.get_calibration(data_idx) # 3 by 4 matrix
         objects = self.kitti_dataset.get_label_objects(data_idx)
-        proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.5)
+        proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.1)
         pc_velo = self.kitti_dataset.get_lidar(data_idx)
         pc_rect = np.zeros_like(pc_velo)
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
@@ -369,6 +373,7 @@ class AvodDataset(object):
         pos_idxs = []
         pos_box = []
         neg_box = []
+        avg_iou = 0.0
         for prop_ in proposals:
             prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
             if prop_corners_image_2d is None:
@@ -407,8 +412,9 @@ class AvodDataset(object):
                 samples.append(sample)
                 neg_box.append(prop_corners_3d)
                 # self.lock.release()
-            elif iou_with_gt >= 0.65:
+            elif iou_with_gt >= 0.5:
                 recall[obj_idx] = 1
+                avg_iou += iou_with_gt
                 for _ in range(self.augmentX):
                     prop = copy.deepcopy(prop_)
                     prop = random_shift_box3d(prop)
@@ -474,10 +480,12 @@ class AvodDataset(object):
         # self.visualize_proposals(pc_rect, pos_box, neg_box, gt_boxes_3d)
         self.load_progress += 1
         print('load {} samples, pos {}'.format(len(samples), len(pos_idxs)))
+        ret = {'samples': samples, 'pos_idxs': pos_idxs}
         if len(objects) > 0:
-            return {'samples': samples, 'pos_idxs': pos_idxs, 'recall': np.sum(recall)/len(objects)}
-        else:
-            return {'samples': samples, 'pos_idxs': pos_idxs}
+            ret['recall'] = np.sum(recall)/len(objects)
+        if len(pos_idxs) > 0:
+            ret['avg_iou'] = avg_iou/len(pos_idxs)
+        return ret
 
     def find_match_label(self, prop_corners, labels_corners):
         '''
@@ -493,6 +501,9 @@ class AvodDataset(object):
             area2 = target.area
             intersection = target.intersection(label).area
             iou = intersection / (area1 + area2 - intersection)
+            # if a proposal cover enough ground truth, take it as positive
+            if intersection / area1 >= 0.8:
+                iou = 0.66
             # print(area1, area2, intersection)
             # print(iou)
             if iou > largest_iou:
