@@ -227,7 +227,11 @@ def get_pointnet_input(sample, proposals_and_scores, roi_features, rpn_score_thr
     label_mask = np.equal(sample[constants.KEY_LABEL_CLASSES], g_type2onehotclass['Car']+1)
     gt_cls = sample[constants.KEY_LABEL_CLASSES][label_mask]
     gt_boxes_3d = sample[constants.KEY_LABEL_BOXES_3D][label_mask]
-    gt_boxes_bev = gt_boxes_3d[:4, [0,2]]
+    gt_boxes_bev = []
+    for i in range(len(gt_cls)):
+        gt_obj = box_3d_encoder.box_3d_to_object_label(gt_boxes_3d[i], gt_cls[i])
+        gt_corner_3d = compute_box_3d(gt_obj)
+        gt_boxes_bev.append(gt_corner_3d[:4, [0,2]])
 
     # point cloud of this frame
     pc = sample[constants.KEY_POINT_CLOUD].T
@@ -613,10 +617,24 @@ def test():
     # print(idx)
     kitti_samples = dataset.load_samples([idx])
     sample = kitti_samples[0]
-    # rpn_out = pickle.load(open("rpn_out/%s" % sample[constants.KEY_SAMPLE_NAME], "rb"))
+
+    label_mask = np.equal(sample[constants.KEY_LABEL_CLASSES], g_type2onehotclass['Car']+1)
+    gt_cls = sample[constants.KEY_LABEL_CLASSES][label_mask]
+    gt_boxes_3d = sample[constants.KEY_LABEL_BOXES_3D][label_mask]
+    gt_boxes_bev = []
+    for i in range(len(gt_cls)):
+        gt_obj = box_3d_encoder.box_3d_to_object_label(gt_boxes_3d[i], gt_cls[i])
+        gt_corner_3d = compute_box_3d(gt_obj)
+        gt_boxes_bev.append(gt_corner_3d[:4, [0,2]])
+    print(gt_boxes_bev)
+
+    rpn_out = pickle.load(open("rpn_out/%s" % sample[constants.KEY_SAMPLE_NAME], "rb"))
+    corners = compute_box_3d(box_3d_encoder.box_3d_to_object_label(rpn_out['proposals_and_scores'][0][:7]))
+    label_idx, iou = find_match_label(corners[:4, [0,2]], gt_boxes_bev)
+    print(label_idx, iou)
     # visualize_rpn_out(sample, rpn_out['proposals_and_scores'])
-    prediction = pickle.load(open("%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
-    visualize(dataset, sample, prediction)
+    # prediction = pickle.load(open("%s"%sample[constants.KEY_SAMPLE_NAME], "rb"))
+    # visualize(dataset, sample, prediction)
 
 if __name__ == '__main__':
     main()
