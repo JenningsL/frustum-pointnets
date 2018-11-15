@@ -161,9 +161,6 @@ class AvodDataset(object):
         else:
             need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio))
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
-        # return at least one sample, otherwise may not have last sample id
-        if len(keep_idxs) == 0:
-            keep_idxs = neg_idxs[:1]
         random.shuffle(keep_idxs)
         p = 0
         n = 0
@@ -189,6 +186,7 @@ class AvodDataset(object):
 
     def load_buffer_repeatedly(self, pos_ratio=0.5):
         i = -1
+        last_sample_id = None
         while not self.stop:
             frame_id = self.frame_ids[i]
             with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'rb') as f:
@@ -196,8 +194,12 @@ class AvodDataset(object):
             samples = self.do_sampling(frame_data, pos_ratio=pos_ratio)
             for s in samples:
                 self.sample_buffer.put(s)
+            # update last_sample_id
+            if len(samples) > 0:
+                last_sample_id = samples[-1].idx
+            # reach end
             if i == len(self.frame_ids) - 1:
-                self.last_sample_id = samples[-1].idx
+                self.last_sample_id = last_sample_id
                 random.shuffle(self.frame_ids)
             i = (i + 1) % len(self.frame_ids)
 
