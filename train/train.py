@@ -381,9 +381,9 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
             log_string('classification accuracy: %f' % \
                 (total_cls_correct / float(total_cls_seen)))
             log_string('recall: %f'% \
-                float(total_tp)/(total_tp+total_fn))
+                (float(total_tp)/(total_tp+total_fn)))
             log_string('precision: %f'% \
-                float(total_tp)/(total_tp+total_fp))
+                (float(total_tp)/(total_tp+total_fp)))
             if total_seen > 0:
                 log_string('segmentation accuracy: %f' % \
                     (total_correct / float(total_seen)))
@@ -519,9 +519,9 @@ def eval_one_epoch(sess, ops, test_writer):
     log_string('eval segmentation accuracy: %f'% \
         (total_correct / float(total_seen)))
     log_string('recall: %f'% \
-        float(total_tp)/(total_tp+total_fn))
+        (float(total_tp)/(total_tp+total_fn)))
     log_string('precision: %f'% \
-        float(total_tp)/(total_tp+total_fp))
+        (float(total_tp)/(total_tp+total_fp)))
     avg_cls_acc = np.mean(np.array(total_correct_class) / \
         np.array(total_seen_class,dtype=np.float))
     log_string('eval classification avg class acc: %f' % avg_cls_acc)
