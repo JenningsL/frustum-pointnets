@@ -169,9 +169,9 @@ def train():
             elif OPTIMIZER == 'adam':
                 optimizer = tf.train.AdamOptimizer(learning_rate)
 
-            if train_cls_only:
+            if FLAGS.train_cls_only:
                 var_list = tf.trainable_variables('cls_')
-            elif train_reg_only:
+            elif FLAGS.train_reg_only:
                 tvars = tf.trainable_variables()
                 var_list = [var for var in tvars if 'cls_' not in var.name]
             else:
