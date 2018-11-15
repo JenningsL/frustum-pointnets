@@ -73,7 +73,7 @@ BN_DECAY_CLIP = 0.99
 # load data set in background thread, remember to join data_loading_thread somewhere
 TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/train',
-             augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
+             augmentX=2, random_shift=False, rotate_to_center=True, random_flip=False)
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
@@ -307,6 +307,9 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
     total_cls_correct = 0
     total_cls_seen = 0
     total_correct = 0
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
     total_seen = 0
     loss_sum = 0
     total_obj_sample = 0
@@ -350,6 +353,12 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
         # classification acc
         cls_preds_val = np.argmax(cls_logits_val, 1)
         cls_correct = np.sum(cls_preds_val == batch_cls_label)
+        tp = np.sum(np.logical_and(cls_preds_val == batch_cls_label, batch_cls_label < g_type2onehotclass['NonObject']))
+        fp = np.sum(np.logical_and(cls_preds_val != batch_cls_label, batch_cls_label == g_type2onehotclass['NonObject']))
+        fn = np.sum(np.logical_and(cls_preds_val != batch_cls_label, batch_cls_label < g_type2onehotclass['NonObject']))
+        total_tp += tp
+        total_fp += fp
+        total_fn += fn
         total_cls_correct += cls_correct
         total_cls_seen += BATCH_SIZE
         # only calculate seg acc and regression performance with object labels
@@ -371,6 +380,10 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
             log_string('mean loss: %f' % (loss_sum / 10))
             log_string('classification accuracy: %f' % \
                 (total_cls_correct / float(total_cls_seen)))
+            log_string('recall: %f'% \
+                float(total_tp)/(total_tp+total_fn))
+            log_string('precision: %f'% \
+                float(total_tp)/(total_tp+total_fp))
             if total_seen > 0:
                 log_string('segmentation accuracy: %f' % \
                     (total_correct / float(total_seen)))
@@ -381,6 +394,9 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
                     (float(iou3d_correct_cnt)/float(total_obj_sample)))
             total_cls_correct = 0
             total_correct = 0
+            total_tp = 0
+            total_fp = 0
+            total_fn = 0
             total_cls_seen = 0
             total_seen = 0
             total_obj_sample = 0
@@ -407,6 +423,9 @@ def eval_one_epoch(sess, ops, test_writer):
     # To collect statistics
     total_cls_correct = 0
     total_cls_seen = 0
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
     total_seen_class = [0 for _ in range(NUM_OBJ_CLASSES)]
     total_correct_class = [0 for _ in range(NUM_OBJ_CLASSES)]
     total_correct = 0
@@ -454,6 +473,12 @@ def eval_one_epoch(sess, ops, test_writer):
         # classification acc
         cls_preds_val = np.argmax(cls_logits_val, 1)
         cls_correct = np.sum(cls_preds_val == batch_cls_label)
+        tp = np.sum(np.logical_and(cls_preds_val == batch_cls_label, batch_cls_label < g_type2onehotclass['NonObject']))
+        fp = np.sum(np.logical_and(cls_preds_val != batch_cls_label, batch_cls_label == g_type2onehotclass['NonObject']))
+        fn = np.sum(np.logical_and(cls_preds_val != batch_cls_label, batch_cls_label < g_type2onehotclass['NonObject']))
+        total_tp += tp
+        total_fp += fp
+        total_fn += fn
         total_cls_correct += cls_correct
         total_cls_seen += BATCH_SIZE
         for l in range(NUM_OBJ_CLASSES):
@@ -493,6 +518,10 @@ def eval_one_epoch(sess, ops, test_writer):
         (total_cls_correct / float(total_cls_seen)))
     log_string('eval segmentation accuracy: %f'% \
         (total_correct / float(total_seen)))
+    log_string('recall: %f'% \
+        float(total_tp)/(total_tp+total_fn))
+    log_string('precision: %f'% \
+        float(total_tp)/(total_tp+total_fp))
     avg_cls_acc = np.mean(np.array(total_correct_class) / \
         np.array(total_seen_class,dtype=np.float))
     log_string('eval classification avg class acc: %f' % avg_cls_acc)
