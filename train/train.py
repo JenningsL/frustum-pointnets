@@ -39,6 +39,8 @@ parser.add_argument('--no_intensity', action='store_true', help='Only use XYZ fo
 parser.add_argument('--restore_model_path', default=None, help='Restore model path e.g. log/model.ckpt [default: None]')
 parser.add_argument('--hard_sample_mining', default=False, help='If train only with classification hard samples')
 parser.add_argument('--pos_ratio', type=float, default=1.0, help='Positive proposal ratio')
+parser.add_argument('--train_cls_only', type=int, default=0, help='Train classification only')
+parser.add_argument('--train_reg_only', type=int, default=0, help='Train box regression only')
 FLAGS = parser.parse_args()
 
 # Set training configurations
@@ -71,7 +73,7 @@ BN_DECAY_CLIP = 0.99
 # load data set in background thread, remember to join data_loading_thread somewhere
 TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/train',
-             augmentX=2, random_shift=True, rotate_to_center=True, random_flip=True)
+             augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
@@ -167,10 +169,18 @@ def train():
             elif OPTIMIZER == 'adam':
                 optimizer = tf.train.AdamOptimizer(learning_rate)
 
+            if train_cls_only:
+                var_list = tf.trainable_variables('cls_')
+            elif train_reg_only:
+                tvars = tf.trainable_variables()
+                var_list = [var for var in tvars if 'cls_' not in var.name]
+            else:
+                var_list = tf.trainable_variables()
+
             # Note: when training, the moving_mean and moving_variance need to be updated.
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
             with tf.control_dependencies(update_ops):
-                train_op = optimizer.minimize(loss, global_step=batch)
+                train_op = optimizer.minimize(loss, global_step=batch, var_list=var_list)
 
             # Add ops to save and restore all the variables.
             saver = tf.train.Saver()
