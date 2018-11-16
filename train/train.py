@@ -72,13 +72,13 @@ BN_DECAY_CLIP = 0.99
 
 # load data set in background thread, remember to join data_loading_thread somewhere
 TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/train',
-             augmentX=2, random_shift=False, rotate_to_center=True, random_flip=False)
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_0.65/train',
+             augmentX=2, random_shift=True, rotate_to_center=True, random_flip=True)
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/val',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_0.65/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
-train_loading_thread = Thread(target=TRAIN_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio,))
-val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio,))
+train_loading_thread = Thread(target=TRAIN_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio, False))
+val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio, True))
 train_loading_thread.start()
 val_loading_thread.start()
 
@@ -324,7 +324,7 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
         batch_data, batch_cls_label, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec, is_last_batch = TRAIN_DATASET.get_next_batch()
+        batch_rot_angle, batch_feature_vec, batch_frame_ids, is_last_batch = TRAIN_DATASET.get_next_batch()
 
         if is_last_batch and len(batch_data) != BATCH_SIZE:
             # discard last batch with fewer data
@@ -443,7 +443,7 @@ def eval_one_epoch(sess, ops, test_writer):
         batch_data, batch_cls_label, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec, is_last_batch = TEST_DATASET.get_next_batch()
+        batch_rot_angle, batch_feature_vec, batch_frame_ids, is_last_batch = TEST_DATASET.get_next_batch()
 
         if is_last_batch and len(batch_data) != BATCH_SIZE:
             # discard last batch with fewer data

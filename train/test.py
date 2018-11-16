@@ -14,6 +14,7 @@ import importlib
 import numpy as np
 import tensorflow as tf
 import cPickle as pickle
+from threading import Thread
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
@@ -49,6 +50,8 @@ NUM_CHANNEL = 4
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_0.65/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
+val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(0.5, True))
+val_loading_thread.start()
 
 def get_session_and_ops(batch_size, num_point):
     ''' Define model graph, load model parameters,
@@ -62,10 +65,7 @@ def get_session_and_ops(batch_size, num_point):
                 MODEL.placeholder_inputs(BATCH_SIZE, NUM_POINT)
             is_training_pl = tf.placeholder(tf.bool, shape=())
             end_points = MODEL.get_model(pointclouds_pl, cls_labels_pl, features_pl,
-                is_training_pl, bn_decay=bn_decay)
-            loss, loss_endpoints = MODEL.get_loss(cls_labels_pl, labels_pl, centers_pl,
-                heading_class_label_pl, heading_residual_label_pl,
-                size_class_label_pl, size_residual_label_pl, end_points)
+                is_training_pl)
             saver = tf.train.Saver()
 
         # Create a session
@@ -77,19 +77,15 @@ def get_session_and_ops(batch_size, num_point):
         # Restore variables from disk.
         saver.restore(sess, MODEL_PATH)
         ops = {'pointclouds_pl': pointclouds_pl,
-               'one_hot_vec_pl': one_hot_vec_pl,
-               'labels_pl': labels_pl,
+               'features_pl': features_pl,
+               'cls_label_pl': cls_labels_pl,
                'centers_pl': centers_pl,
-               'heading_class_label_pl': heading_class_label_pl,
-               'heading_residual_label_pl': heading_residual_label_pl,
-               'size_class_label_pl': size_class_label_pl,
-               'size_residual_label_pl': size_residual_label_pl,
                'is_training_pl': is_training_pl,
                'logits': end_points['mask_logits'],
                'cls_logits': end_points['cls_logits'],
                'center': end_points['center'],
                'end_points': end_points,
-               'loss': loss}
+               }
         return sess, ops
 
 def softmax(x):
@@ -99,7 +95,7 @@ def softmax(x):
     probs /= np.sum(probs, axis=len(shape)-1, keepdims=True)
     return probs
 
-def inference(sess, ops, pc, feature_vec, cls_label, batch_size):
+def inference(sess, ops, pc, feature_vec, cls_label):
     ''' Run inference for frustum pointnets in batch mode '''
     assert pc.shape[0] == BATCH_SIZE
 
@@ -108,11 +104,11 @@ def inference(sess, ops, pc, feature_vec, cls_label, batch_size):
     feed_dict = {ops['pointclouds_pl']: pc,
                  ops['features_pl']: feature_vec,
                  ops['cls_label_pl']: cls_label,
-                 ops['is_training_pl']: is_training}
+                 ops['is_training_pl']: False}
     cls_logits, logits, centers, \
     heading_logits, heading_residuals, \
     size_logits, size_residuals = \
-        sess.run([ep['cls_logits'], ep['logits'], ep['center'],
+        sess.run([ep['cls_logits'], ep['mask_logits'], ep['center'],
             ep['heading_scores'], ep['heading_residuals'],
             ep['size_scores'], ep['size_residuals']],
             feed_dict=feed_dict)

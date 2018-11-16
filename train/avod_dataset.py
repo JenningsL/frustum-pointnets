@@ -149,17 +149,21 @@ class AvodDataset(object):
         print('Avg iou: {}'.format(np.mean(avg_iou)))
         print('Avg points: {}, pos_ratio: {}'.format(npoints/pos_count, obj_points/npoints))
 
-    def do_sampling(self, frame_data, pos_ratio=0.5):
+    def do_sampling(self, frame_data, pos_ratio=0.5, is_eval=False):
         samples = frame_data['samples']
         pos_idxs = frame_data['pos_idxs']
         neg_idxs = [i for i in range(0, len(samples)) if i not in pos_idxs]
         random.shuffle(neg_idxs)
-        if pos_ratio == 0.0:
+        if is_eval:
+            #need_neg = int(len(neg_idxs) * 0.5)
+            need_neg = len(neg_idxs)
+            keep_idxs = pos_idxs + neg_idxs[:need_neg]
+        elif pos_ratio == 0.0:
             keep_idxs = neg_idxs
         elif pos_ratio == 1.0:
             keep_idxs = pos_idxs
         else:
-            need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio))
+            need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio)) + 10
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
         random.shuffle(keep_idxs)
         p = 0
@@ -184,15 +188,16 @@ class AvodDataset(object):
     def stop_loading(self):
         self.stop = True
 
-    def load_buffer_repeatedly(self, pos_ratio=0.5):
+    def load_buffer_repeatedly(self, pos_ratio=0.5, is_eval=False):
         i = -1
         last_sample_id = None
         while not self.stop:
             frame_id = self.frame_ids[i]
             with open(os.path.join(self.save_dir, frame_id+'.pkl'), 'rb') as f:
                 frame_data = pickle.load(f)
-            samples = self.do_sampling(frame_data, pos_ratio=pos_ratio)
+            samples = self.do_sampling(frame_data, pos_ratio=pos_ratio, is_eval=is_eval)
             for s in samples:
+                s.frame_id = frame_id
                 self.sample_buffer.put(s)
             # update last_sample_id
             if len(samples) > 0:
@@ -225,6 +230,7 @@ class AvodDataset(object):
         batch_size_residual = np.zeros((bsize, 3))
         batch_rot_angle = np.zeros((bsize,))
         batch_feature_vec = np.zeros((bsize, samples[0].feature_vec.shape[0]))
+        frame_ids = []
         for i in range(bsize):
             sample = samples[i]
             point_set = copy.deepcopy(sample.point_set[:,0:self.num_channel])
@@ -245,10 +251,11 @@ class AvodDataset(object):
             batch_size_residual[i] = sample.size_residual
             batch_rot_angle[i] = sample.rot_angle
             batch_feature_vec[i] = sample.feature_vec
+            frame_ids.append(sample.frame_id)
         return batch_data, batch_cls_label, batch_label, batch_center, \
             batch_heading_class, batch_heading_residual, \
             batch_size_class, batch_size_residual, \
-            batch_rot_angle, batch_feature_vec, is_last_batch
+            batch_rot_angle, batch_feature_vec, frame_ids, is_last_batch
 
     def get_center_view_rot_angle(self, frustum_angle):
         ''' Get the frustum rotation angle, it isshifted by pi/2 so that it
@@ -390,7 +397,7 @@ class AvodDataset(object):
             # find corresponding label object
             obj_idx, iou_with_gt = self.find_match_label(prop_box_xy, gt_boxes_xy)
 
-            if iou_with_gt < 0.3:
+            if iou_with_gt < 0.65:
                 # non-object
                 obj_type = 'NonObject'
                 gt_box_3d = np.zeros((8, 3))
@@ -418,7 +425,7 @@ class AvodDataset(object):
                 samples.append(sample)
                 neg_box.append(prop_corners_3d)
                 # self.lock.release()
-            elif iou_with_gt >= 0.5:
+            elif iou_with_gt >= 0.65:
                 recall[obj_idx] = 1
                 avg_iou.append(iou_with_gt)
                 for _ in range(self.augmentX):
@@ -509,8 +516,8 @@ class AvodDataset(object):
             intersection = target.intersection(label).area
             iou = intersection / (area1 + area2 - intersection)
             # if a proposal cover enough ground truth, take it as positive
-            if intersection / area1 >= 0.8:
-                iou = 0.66
+            #if intersection / area1 >= 0.8:
+            #    iou = 0.66
             # print(area1, area2, intersection)
             # print(iou)
             if iou > largest_iou:
@@ -522,12 +529,12 @@ if __name__ == '__main__':
     kitti_path = sys.argv[1]
     split = sys.argv[2]
     if split == 'train':
-        augmentX = 3
+        augmentX = 2
         perturb_prop = True
     else:
         augmentX = 1
         perturb_prop = False
-    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset/'+split,
+    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_0.65/'+split,
                  augmentX=augmentX, random_shift=True, rotate_to_center=True, random_flip=True, perturb_prop=perturb_prop)
     dataset.preprocess()
 
