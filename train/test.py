@@ -24,6 +24,8 @@ from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES, g_type2onehotclass, typ
 from avod_dataset import AvodDataset, Sample
 import provider
 from train_util import get_batch
+from kitti_object import *
+import kitti_util as utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', type=int, default=0, help='GPU to use [default: GPU 0]')
@@ -52,6 +54,8 @@ TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BAT
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(0.5, True))
 val_loading_thread.start()
+
+kitti_dataset = kitti_object('/data/ssd/public/jlliu/Kitti/object')
 
 def get_session_and_ops(batch_size, num_point):
     ''' Define model graph, load model parameters,
@@ -134,6 +138,14 @@ def inference(sess, ops, pc, feature_vec, cls_label):
     return type_cls, centers, heading_cls, heading_res, \
         size_cls, size_res, scores
 
+class DetectObject(object):
+    def __init__(h,w,l,tx,ty,tz,ry):
+        self.t = [tx,ty,tz]
+        self.ry = ry
+        self.h = h
+        self.w = w
+        self.l = l
+
 def write_detection_results(result_dir, id_list, type_list, box2d_list, center_list, \
                             heading_cls_list, heading_res_list, \
                             size_cls_list, size_res_list, \
@@ -144,11 +156,19 @@ def write_detection_results(result_dir, id_list, type_list, box2d_list, center_l
     for i in range(len(center_list)):
         idx = id_list[i]
         output_str = type_list[i] + " -1 -1 -10 "
-        box2d = box2d_list[i]
-        output_str += "%f %f %f %f " % (box2d[0],box2d[1],box2d[2],box2d[3])
+        # box2d = box2d_list[i]
+        # output_str += "%f %f %f %f " % (box2d[0],box2d[1],box2d[2],box2d[3])
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(center_list[i],
             heading_cls_list[i], heading_res_list[i],
             size_cls_list[i], size_res_list[i], rot_angle_list[i])
+        # cal 2d box from 3d box
+        calib = kitti_dataset.get_calibration(idx)
+        box3d_pts_2d, box3d_pts_3d = utils.compute_box_3d(DetectObject(h,w,l,tx,ty,tz,ry), calib.P)
+        x1 = np.amin(box3d_pts_2d[0])
+        y1 = np.amin(box3d_pts_2d[1])
+        x2 = np.amax(box3d_pts_2d[0])
+        y2 = np.amax(box3d_pts_2d[1])
+        output_str += "%f %f %f %f " % (x1, y1, x2, y2)
         score = score_list[i]
         output_str += "%f %f %f %f %f %f %f %f" % (h,w,l,tx,ty,tz,ry,score)
         if idx not in results: results[idx] = []
@@ -189,6 +209,10 @@ def test(output_filename, result_dir=None):
     score_list = []
     frame_id_list = []
 
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+
     sess, ops = get_session_and_ops(batch_size=BATCH_SIZE, num_point=NUM_POINT)
     # for batch_idx in range(num_batches):
     batch_idx = 0
@@ -203,12 +227,21 @@ def test(output_filename, result_dir=None):
             # discard last batch with fewer data
             break
         print('batch idx: %d' % (batch_idx))
+        batch_idx += 1
 
         # Run one batch inference
     	batch_cls, batch_center_pred, \
             batch_hclass_pred, batch_hres_pred, \
             batch_sclass_pred, batch_sres_pred, batch_scores = \
             inference(sess, ops, batch_data, batch_feature_vec, batch_cls_label)
+
+        tp = np.sum(np.logical_and(batch_cls == batch_cls_label, batch_cls_label < g_type2onehotclass['NonObject']))
+        fp = np.sum(np.logical_and(batch_cls != batch_cls_label, batch_cls_label == g_type2onehotclass['NonObject']))
+        fn = np.sum(np.logical_and(batch_cls != batch_cls_label, batch_cls_label < g_type2onehotclass['NonObject']))
+        total_tp += tp
+        total_fp += fp
+        total_fn += fn
+        print('average recall: {}, precision: {}'.format(float(total_tp)/(total_tp+total_fn), float(total_tp)/(total_tp+total_fp)))
 
         for i in range(BATCH_SIZE):
             ps_list.append(batch_data[i,...])
@@ -220,7 +253,7 @@ def test(output_filename, result_dir=None):
             size_res_list.append(batch_sres_pred[i,:])
             rot_angle_list.append(batch_rot_angle[i])
             score_list.append(batch_scores[i])
-        frame_id_list += batch_frame_ids
+        frame_id_list += map(lambda fid: int(fid), batch_frame_ids)
 
     if FLAGS.dump_result:
         with open(output_filename, 'wp') as fp:
