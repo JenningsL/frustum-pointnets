@@ -139,7 +139,7 @@ def inference(sess, ops, pc, feature_vec, cls_label):
         size_cls, size_res, scores
 
 class DetectObject(object):
-    def __init__(h,w,l,tx,ty,tz,ry):
+    def __init__(self, h,w,l,tx,ty,tz,ry):
         self.t = [tx,ty,tz]
         self.ry = ry
         self.h = h
@@ -154,6 +154,8 @@ def write_detection_results(result_dir, id_list, type_list, box2d_list, center_l
     if result_dir is None: return
     results = {} # map from idx to list of strings, each string is a line (without \n)
     for i in range(len(center_list)):
+        if type_list[i] == 'NonObject':
+            continue
         idx = id_list[i]
         output_str = type_list[i] + " -1 -1 -10 "
         # box2d = box2d_list[i]
@@ -164,6 +166,9 @@ def write_detection_results(result_dir, id_list, type_list, box2d_list, center_l
         # cal 2d box from 3d box
         calib = kitti_dataset.get_calibration(idx)
         box3d_pts_2d, box3d_pts_3d = utils.compute_box_3d(DetectObject(h,w,l,tx,ty,tz,ry), calib.P)
+        print(box3d_pts_3d)
+        if box3d_pts_2d is None:
+            continue
         x1 = np.amin(box3d_pts_2d[0])
         y1 = np.amin(box3d_pts_2d[1])
         x2 = np.amax(box3d_pts_2d[0])
@@ -192,6 +197,39 @@ def fill_files(output_dir, to_fill_filename_list):
         if not os.path.exists(filepath):
             fout = open(filepath, 'w')
             fout.close()
+
+def test1(output_filename, result_dir=None):
+    ps_list = []
+    cls_list = []
+    center_list = []
+    heading_cls_list = []
+    heading_res_list = []
+    size_cls_list = []
+    size_res_list = []
+    rot_angle_list = []
+    score_list = []
+    frame_id_list = []
+    with open(output_filename, 'rp') as fp:
+        ps_list = pickle.load(fp)
+        cls_list = pickle.load(fp)
+        center_list = pickle.load(fp)
+        heading_cls_list = pickle.load(fp)
+        heading_res_list = pickle.load(fp)
+        size_cls_list = pickle.load(fp)
+        size_res_list = pickle.load(fp)
+        rot_angle_list = pickle.load(fp)
+        score_list = pickle.load(fp)
+        frame_id_list = pickle.load(fp)
+
+    type_list = map(lambda i: type_whitelist[i], cls_list)
+    #TODO: box2d_list, project to image
+    box2d_list = np.zeros((len(ps_list), 4))
+    # Write detection results for KITTI evaluation
+    write_detection_results(result_dir, frame_id_list,
+        type_list, box2d_list,
+        center_list, heading_cls_list, heading_res_list,
+        size_cls_list, size_res_list, rot_angle_list, score_list)
+
 
 def test(output_filename, result_dir=None):
     ''' Test frustum pointents with 2D boxes from a RGB detector.
@@ -226,6 +264,8 @@ def test(output_filename, result_dir=None):
         if is_last_batch and len(batch_data) != BATCH_SIZE:
             # discard last batch with fewer data
             break
+        #if batch_idx > 200:
+        #    break
         print('batch idx: %d' % (batch_idx))
         batch_idx += 1
 
@@ -280,3 +320,4 @@ def test(output_filename, result_dir=None):
 
 if __name__=='__main__':
     test(FLAGS.output+'.pickle', FLAGS.output)
+    #test1(FLAGS.output+'.pickle', FLAGS.output)
