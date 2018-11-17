@@ -26,6 +26,8 @@ import provider
 from train_util import get_batch
 from kitti_object import *
 import kitti_util as utils
+sys.path.append(os.path.join(ROOT_DIR, 'avod_prop'))
+from kitti_object_avod import non_max_suppression
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', type=int, default=0, help='GPU to use [default: GPU 0]')
@@ -52,8 +54,6 @@ NUM_CHANNEL = 4
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_0.65/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
-val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(0.5, True))
-val_loading_thread.start()
 
 kitti_dataset = kitti_object('/data/ssd/public/jlliu/Kitti/object')
 
@@ -198,7 +198,7 @@ def write_detection_results(result_dir, detection_objects):
         results[idx] = []
         for obj in obj_list:
             output_str = obj.type_label + " -1 -1 -10 "
-            box2d = obj.box2d
+            box2d = obj.box_2d
             output_str += "%f %f %f %f " % (box2d[0], box2d[1], box2d[2], box2d[3])
             output_str += "%f %f %f %f %f %f %f %f" % (obj.h,obj.w,obj.l,obj.t[0],obj.t[1],obj.t[2],obj.ry,obj.score)
             results[idx].append(output_str)
@@ -272,6 +272,9 @@ def test(output_filename, result_dir=None):
     Write test results to KITTI format label files.
     todo (rqi): support variable number of points.
     '''
+    val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(0.5, True))
+    val_loading_thread.start()
+
     ps_list = []
     cls_list = []
     center_list = []
@@ -331,27 +334,18 @@ def test(output_filename, result_dir=None):
             score_list.append(batch_scores[i])
         frame_id_list += map(lambda fid: int(fid), batch_frame_ids)
 
-    if FLAGS.dump_result:
-        with open(output_filename, 'wp') as fp:
-            pickle.dump(ps_list, fp)
-            pickle.dump(cls_list, fp)
-            pickle.dump(center_list, fp)
-            pickle.dump(heading_cls_list, fp)
-            pickle.dump(heading_res_list, fp)
-            pickle.dump(size_cls_list, fp)
-            pickle.dump(size_res_list, fp)
-            pickle.dump(rot_angle_list, fp)
-            pickle.dump(score_list, fp)
-            pickle.dump(frame_id_list, fp)
-
     type_list = map(lambda i: type_whitelist[i], cls_list)
 
     detection_objects = to_detection_objects(frame_id_list, type_list,
         center_list, heading_cls_list, heading_res_list,
         size_cls_list, size_res_list, rot_angle_list, score_list)
     detection_objects = nms_on_bev(detection_objects, 0.01)
+    if FLAGS.dump_result:
+        with open(output_filename, 'wp') as fp:
+            pickle.dump(detection_objects, fp)
     # Write detection results for KITTI evaluation
     write_detection_results(result_dir, detection_objects)
+    val_loading_thread.join()
 
 if __name__=='__main__':
     test(FLAGS.output+'.pickle', FLAGS.output)
