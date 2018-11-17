@@ -118,13 +118,15 @@ def inference(sess, ops, pc, feature_vec, cls_label):
             feed_dict=feed_dict)
 
     # Compute scores
+    batch_cls_prob = np.max(softmax(cls_logits),1) # B,
     batch_seg_prob = softmax(logits)[:,:,1] # BxN
     batch_seg_mask = np.argmax(logits, 2) # BxN
     mask_mean_prob = np.sum(batch_seg_prob * batch_seg_mask, 1) # B,
     mask_mean_prob = mask_mean_prob / np.sum(batch_seg_mask,1) # B,
     heading_prob = np.max(softmax(heading_logits),1) # B
     size_prob = np.max(softmax(size_logits),1) # B,
-    scores = np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
+    # scores = np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
+    scores = (batch_cls_prob + mask_mean_prob + heading_prob + size_prob) / 4
     # Finished computing scores
 
     type_cls = np.argmax(cls_logits, 1)
@@ -139,45 +141,67 @@ def inference(sess, ops, pc, feature_vec, cls_label):
         size_cls, size_res, scores
 
 class DetectObject(object):
-    def __init__(self, h,w,l,tx,ty,tz,ry):
+    def __init__(self, h,w,l,tx,ty,tz,ry, frame_id, type_label, score, box_2d=None, box_3d=None):
         self.t = [tx,ty,tz]
         self.ry = ry
         self.h = h
         self.w = w
         self.l = l
+        self.frame_id = frame_id
+        self.type_label = type_label
+        self.score = score
+        self.box_2d = box_2d
+        self.box_3d = box_3d # corners
 
-def write_detection_results(result_dir, id_list, type_list, box2d_list, center_list, \
-                            heading_cls_list, heading_res_list, \
-                            size_cls_list, size_res_list, \
-                            rot_angle_list, score_list):
-    ''' Write frustum pointnets results to KITTI format label files. '''
-    if result_dir is None: return
-    results = {} # map from idx to list of strings, each string is a line (without \n)
+calib_cache = {}
+def get_calibration(idx):
+    if idx not in calib_cache:
+        calib_cache[idx] = kitti_dataset.get_calibration(idx)
+    return calib_cache[idx]
+
+def to_detection_objects(id_list, type_list, center_list, \
+                        heading_cls_list, heading_res_list, \
+                        size_cls_list, size_res_list, \
+                        rot_angle_list, score_list):
+    objects = {}
     for i in range(len(center_list)):
         if type_list[i] == 'NonObject':
             continue
         idx = id_list[i]
-        output_str = type_list[i] + " -1 -1 -10 "
-        # box2d = box2d_list[i]
-        # output_str += "%f %f %f %f " % (box2d[0],box2d[1],box2d[2],box2d[3])
+        score = score_list[i]
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(center_list[i],
             heading_cls_list[i], heading_res_list[i],
             size_cls_list[i], size_res_list[i], rot_angle_list[i])
+        obj = DetectObject(h,w,l,tx,ty,tz,ry,idx,type_list[i],score)
         # cal 2d box from 3d box
-        calib = kitti_dataset.get_calibration(idx)
-        box3d_pts_2d, box3d_pts_3d = utils.compute_box_3d(DetectObject(h,w,l,tx,ty,tz,ry), calib.P)
-        print(box3d_pts_3d)
+        calib = get_calibration(idx)
+        box3d_pts_2d, box3d_pts_3d = utils.compute_box_3d(obj, calib.P)
         if box3d_pts_2d is None:
             continue
-        x1 = np.amin(box3d_pts_2d[0])
-        y1 = np.amin(box3d_pts_2d[1])
-        x2 = np.amax(box3d_pts_2d[0])
-        y2 = np.amax(box3d_pts_2d[1])
-        output_str += "%f %f %f %f " % (x1, y1, x2, y2)
-        score = score_list[i]
-        output_str += "%f %f %f %f %f %f %f %f" % (h,w,l,tx,ty,tz,ry,score)
-        if idx not in results: results[idx] = []
-        results[idx].append(output_str)
+        x1 = np.amin(box3d_pts_2d, axis=0)[0]
+        y1 = np.amin(box3d_pts_2d, axis=0)[1]
+        x2 = np.amax(box3d_pts_2d, axis=0)[0]
+        y2 = np.amax(box3d_pts_2d, axis=0)[1]
+        obj.box_2d = [x1,y1,x2,y2]
+        obj.box_3d = box3d_pts_3d
+
+        if idx not in objects:
+            objects[idx] = []
+        objects[idx].append(obj)
+    return objects
+
+def write_detection_results(result_dir, detection_objects):
+    ''' Write frustum pointnets results to KITTI format label files. '''
+    if result_dir is None: return
+    results = {} # map from idx to list of strings, each string is a line (without \n)
+    for idx, obj_list in detection_objects.items():
+        results[idx] = []
+        for obj in obj_list:
+            output_str = obj.type_label + " -1 -1 -10 "
+            box2d = obj.box2d
+            output_str += "%f %f %f %f " % (box2d[0], box2d[1], box2d[2], box2d[3])
+            output_str += "%f %f %f %f %f %f %f %f" % (obj.h,obj.w,obj.l,obj.t[0],obj.t[1],obj.t[2],obj.ry,obj.score)
+            results[idx].append(output_str)
 
     # Write TXT files
     if not os.path.exists(result_dir): os.mkdir(result_dir)
@@ -198,7 +222,19 @@ def fill_files(output_dir, to_fill_filename_list):
             fout = open(filepath, 'w')
             fout.close()
 
-def test1(output_filename, result_dir=None):
+def nms_on_bev(objects, iou_threshold=0.1):
+    for idx, obj_list in objects.items():
+        scores = map(lambda obj:obj.score, obj_list)
+        corners = map(lambda obj:obj.box_3d, obj_list)
+        bev_boxes = list(map(lambda p: [np.amin(p[0],axis=0)[0], np.amin(p[0], axis=0)[2], np.amax(p[0], axis=0)[0], np.amax(p[0], axis=0)[2], p[1]], zip(corners, scores)))
+        bev_boxes = np.array(bev_boxes)
+        print('final output before nms: {0}'.format(len(bev_boxes)))
+        nms_idxs = non_max_suppression(bev_boxes, iou_threshold)
+        print('final output after nms: {0}'.format(len(nms_idxs)))
+        objects[idx] = [obj_list[i] for i in nms_idxs]
+    return objects
+
+def test_from_pickle(output_filename, result_dir=None):
     ps_list = []
     cls_list = []
     center_list = []
@@ -222,13 +258,13 @@ def test1(output_filename, result_dir=None):
         frame_id_list = pickle.load(fp)
 
     type_list = map(lambda i: type_whitelist[i], cls_list)
-    #TODO: box2d_list, project to image
-    box2d_list = np.zeros((len(ps_list), 4))
-    # Write detection results for KITTI evaluation
-    write_detection_results(result_dir, frame_id_list,
-        type_list, box2d_list,
+
+    detection_objects = to_detection_objects(frame_id_list, type_list,
         center_list, heading_cls_list, heading_res_list,
         size_cls_list, size_res_list, rot_angle_list, score_list)
+    detection_objects = nms_on_bev(detection_objects, 0.01)
+    # Write detection results for KITTI evaluation
+    write_detection_results(result_dir, detection_objects)
 
 
 def test(output_filename, result_dir=None):
@@ -309,15 +345,14 @@ def test(output_filename, result_dir=None):
             pickle.dump(frame_id_list, fp)
 
     type_list = map(lambda i: type_whitelist[i], cls_list)
-    #TODO: box2d_list, project to image
-    box2d_list = np.zeros((len(ps_list), 4))
-    # Write detection results for KITTI evaluation
-    write_detection_results(result_dir, frame_id_list,
-        type_list, box2d_list,
+
+    detection_objects = to_detection_objects(frame_id_list, type_list,
         center_list, heading_cls_list, heading_res_list,
         size_cls_list, size_res_list, rot_angle_list, score_list)
-
+    detection_objects = nms_on_bev(detection_objects, 0.01)
+    # Write detection results for KITTI evaluation
+    write_detection_results(result_dir, detection_objects)
 
 if __name__=='__main__':
     test(FLAGS.output+'.pickle', FLAGS.output)
-    #test1(FLAGS.output+'.pickle', FLAGS.output)
+    #test_from_pickle(FLAGS.output+'.pickle', FLAGS.output)
