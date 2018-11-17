@@ -111,7 +111,7 @@ class AvodDataset(object):
         self.stop = False # stop loading thread
         self.last_sample_id = None
 
-        self.sample_buffer = Queue(maxsize=5120)
+        self.sample_buffer = Queue(maxsize=2048)
 
         # self.lock = threading.Lock()
 

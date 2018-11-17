@@ -228,9 +228,9 @@ def nms_on_bev(objects, iou_threshold=0.1):
         corners = map(lambda obj:obj.box_3d, obj_list)
         bev_boxes = list(map(lambda p: [np.amin(p[0],axis=0)[0], np.amin(p[0], axis=0)[2], np.amax(p[0], axis=0)[0], np.amax(p[0], axis=0)[2], p[1]], zip(corners, scores)))
         bev_boxes = np.array(bev_boxes)
-        print('final output before nms: {0}'.format(len(bev_boxes)))
+        #print('final output before nms: {0}'.format(len(bev_boxes)))
         nms_idxs = non_max_suppression(bev_boxes, iou_threshold)
-        print('final output after nms: {0}'.format(len(nms_idxs)))
+        #print('final output after nms: {0}'.format(len(nms_idxs)))
         objects[idx] = [obj_list[i] for i in nms_idxs]
     return objects
 
@@ -303,7 +303,7 @@ def test(output_filename, result_dir=None):
         if is_last_batch and len(batch_data) != BATCH_SIZE:
             # discard last batch with fewer data
             break
-        #if batch_idx > 200:
+        #if batch_idx > 1000:
         #    break
         print('batch idx: %d' % (batch_idx))
         batch_idx += 1
@@ -320,7 +320,8 @@ def test(output_filename, result_dir=None):
         total_tp += tp
         total_fp += fp
         total_fn += fn
-        print('average recall: {}, precision: {}'.format(float(total_tp)/(total_tp+total_fn), float(total_tp)/(total_tp+total_fp)))
+        if total_tp+total_fn > 0 and total_tp+total_fp > 0:
+            print('average recall: {}, precision: {}'.format(float(total_tp)/(total_tp+total_fn), float(total_tp)/(total_tp+total_fp)))
 
         for i in range(BATCH_SIZE):
             ps_list.append(batch_data[i,...])
@@ -345,6 +346,8 @@ def test(output_filename, result_dir=None):
             pickle.dump(detection_objects, fp)
     # Write detection results for KITTI evaluation
     write_detection_results(result_dir, detection_objects)
+    print('write detection results to ' + result_dir)
+    TEST_DATASET.stop_loading()
     val_loading_thread.join()
 
 if __name__=='__main__':

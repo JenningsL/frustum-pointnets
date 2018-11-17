@@ -17,8 +17,8 @@ sys.path.append(os.path.join(BASE_DIR, 'models'))
 from model_util import type_whitelist
 import kitti_util as utils
 from kitti_object import *
-import mayavi.mlab as mlab
-from viz_util import draw_lidar, draw_gt_boxes3d
+#import mayavi.mlab as mlab
+#from viz_util import draw_lidar, draw_gt_boxes3d
 
 from wavedata.tools.visualization import vis_utils
 
@@ -116,12 +116,12 @@ def visualize(dataset, frame_id, prediction, show_3d=False, output_dir=None):
     # draw prediction on second image
     pred_corners = draw_boxes(prediction, calib, pred_3d_axes)
     if output_dir:
-        filename = os.path.join(output_dir, 'result_2d_image/%6d.png' % frame_id)
+        filename = os.path.join(output_dir, 'result_2d_image/%06d.png' % frame_id)
         plt.savefig(filename)
         plt.close(pred_fig)
     else:
         plt.show()
-        input()
+        #input()
 
     if show_3d:
         # 3d visualization
@@ -132,9 +132,9 @@ def visualize(dataset, frame_id, prediction, show_3d=False, output_dir=None):
             boxes3d_velo.append(pts_velo)
         fig = draw_lidar(pc_velo)
         fig = draw_gt_boxes3d(boxes3d_velo, fig, draw_text=False, color=(1, 1, 1))
-        input()
+        #input()
         if output_dir:
-            filename = os.path.join(output_dir, 'result_3d_image/%6d.png' % frame_id)
+            filename = os.path.join(output_dir, 'result_3d_image/%06d.png' % frame_id)
             mlab.savefig(filename, figure=fig)
 
 if __name__ == '__main__':

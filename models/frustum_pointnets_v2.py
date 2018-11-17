@@ -55,17 +55,19 @@ def get_instance_seg_v2_net(point_cloud, feature_vec, cls_label,
     cls_net = tf.reshape(l3_points, [batch_size, -1])
     cls_net = tf.concat([cls_net, feature_vec], axis=1)
     cls_net = tf_util.fully_connected(cls_net, 512, bn=True, is_training=is_training, scope='cls_fc1', bn_decay=bn_decay)
-    cls_net = tf_util.dropout(cls_net, keep_prob=0.4, is_training=is_training, scope='cls_dp1')
+    #cls_net = tf_util.dropout(cls_net, keep_prob=0.4, is_training=is_training, scope='cls_dp1')
     cls_net = tf_util.fully_connected(cls_net, 256, bn=True, is_training=is_training, scope='cls_fc2', bn_decay=bn_decay)
-    cls_net = tf_util.dropout(cls_net, keep_prob=0.4, is_training=is_training, scope='cls_dp2')
+    #cls_net = tf_util.dropout(cls_net, keep_prob=0.4, is_training=is_training, scope='cls_dp2')
     cls_net = tf_util.fully_connected(cls_net, NUM_OBJ_CLASSES, activation_fn=None, scope='cls_logits')
     end_points['cls_logits'] = cls_net
 
     cls_label_pred = tf.argmax(tf.nn.softmax(end_points['cls_logits']), axis=1)
     end_points['one_hot_vec'] = tf.one_hot(cls_label_pred, NUM_OBJ_CLASSES)
-    #end_points['one_hot_vec'] = tf.one_hot(cls_label, NUM_OBJ_CLASSES)
+    end_points['one_hot_gt'] = tf.one_hot(cls_label, NUM_OBJ_CLASSES)
     # Feature Propagation layers
-    l3_points = tf.concat([l3_points, tf.expand_dims(end_points['one_hot_vec'], 1)], axis=2)
+    one_hot_vec = tf.cond(is_training, lambda: end_points['one_hot_gt'], lambda: end_points['one_hot_vec'])
+    l3_points = tf.concat([l3_points, tf.expand_dims(one_hot_vec, 1)], axis=2)
+
     l2_points = pointnet_fp_module(l2_xyz, l3_xyz, l2_points, l3_points,
         [128,128], is_training, bn_decay, scope='fa_layer1')
     l1_points = pointnet_fp_module(l1_xyz, l2_xyz, l1_points, l2_points,
@@ -120,11 +122,14 @@ def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec, feature_vec,
 
     # Fully connected layers
     net = tf.reshape(l3_points, [batch_size, -1])
-    net = tf.concat([net, one_hot_vec, feature_vec], axis=1)
+    #net = tf.concat([net, one_hot_vec, feature_vec], axis=1)
+    net = tf.concat([net, one_hot_vec], axis=1)
     net = tf_util.fully_connected(net, 512, bn=True,
         is_training=is_training, scope='fc1', bn_decay=bn_decay)
+    #net = tf_util.dropout(net, keep_prob=0.4, is_training=is_training, scope='est_dp1')
     net = tf_util.fully_connected(net, 256, bn=True,
         is_training=is_training, scope='fc2', bn_decay=bn_decay)
+    #net = tf_util.dropout(net, keep_prob=0.4, is_training=is_training, scope='est_dp2')
 
     # The first 3 numbers: box center coordinates (cx,cy,cz),
     # the next NUM_HEADING_BIN*2:  heading bin class scores and bin residuals
@@ -164,7 +169,7 @@ def get_model(point_cloud, cls_label, feature_vec, is_training, bn_decay=None):
 
     # T-Net and coordinate translation
     center_delta, end_points = get_center_regression_net(\
-        object_point_cloud_xyz, end_points['one_hot_vec'],
+        object_point_cloud_xyz, end_points['one_hot_gt'],
         is_training, bn_decay, end_points)
     stage1_center = center_delta + mask_xyz_mean # Bx3
     end_points['stage1_center'] = stage1_center
@@ -174,7 +179,7 @@ def get_model(point_cloud, cls_label, feature_vec, is_training, bn_decay=None):
 
     # Amodel Box Estimation PointNet
     output, end_points = get_3d_box_estimation_v2_net(\
-        object_point_cloud_xyz_new, end_points['one_hot_vec'], feature_vec,
+        object_point_cloud_xyz_new, end_points['one_hot_gt'], feature_vec,
         is_training, bn_decay, end_points)
 
     # Parse output to 3D box parameters
