@@ -81,7 +81,7 @@ class Sample(object):
 class AvodDataset(object):
     def __init__(self, npoints, kitti_path, batch_size, split, save_dir,
                  augmentX=1, random_shift=False, rotate_to_center=False, random_flip=False,
-                 perturb_prop=False):
+                 perturb_prop=False, fill_with_label=False):
         self.npoints = npoints
         self.random_shift = random_shift
         self.random_flip = random_flip
@@ -91,7 +91,7 @@ class AvodDataset(object):
         self.save_dir = save_dir
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        self.proposal_per_frame = 1024
+        self.fill_with_label = fill_with_label
         self.num_channel = 4
         rpn_output_path = os.path.join(kitti_path, 'training/proposal')
         def is_prop_file(f):
@@ -113,7 +113,8 @@ class AvodDataset(object):
 
         self.sample_buffer = Queue(maxsize=2048)
 
-        # self.lock = threading.Lock()
+        # roi_features of the first positive proposal, for generating proposal from label
+        self.roi_feature_ = None
 
     def load_split_ids(self, split):
         with open(os.path.join(self.kitti_path, split + '.txt')) as f:
@@ -281,16 +282,71 @@ class AvodDataset(object):
         box3d_center = (box3d[0,:] + box3d[6,:])/2.0
         return box3d_center
 
-    def get_one_sample(self, gt_box_3d, pc, seg, cls_type, heading_angle, \
-        box3d_size, frustum_angle, proposal):
+    def get_one_sample(self, proposal, pc_rect, calib, gt_box_3d, gt_object):
         '''convert to frustum sample format'''
+        prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(proposal, calib.P)
+        if prop_corners_image_2d is None:
+            print('skip proposal behind camera')
+            return False
+        # get points within proposal box
+        # FIXME: sometimes this raise error
+        try:
+            _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+        except Exception as e:
+            print('extract_pc_in_box3d fail')
+            return False
+
+        pc_in_prop_box = pc_rect[prop_inds,:]
+        # shuffle points order
+        np.random.shuffle(pc_in_prop_box)
+        # segmentation label
+        seg_mask = np.zeros((pc_in_prop_box.shape[0]))
+
+        if gt_object is not None:
+            obj_type = gt_object.type
+
+            # FIXME: sometimes this raise error
+            try:
+                _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
+            except Exception as e:
+                print('extract_pc_in_box3d fail')
+                return False
+
+            seg_mask[inds] = 1
+            # Reject object without points
+            if np.sum(seg_mask)==0:
+                print('Reject object without points')
+                return False
+
+            # Get 3D BOX heading
+            heading_angle = gt_object.ry
+            # Get 3D BOX size
+            box3d_size = np.array([gt_object.l, gt_object.w, gt_object.h])
+            # Get frustum angle
+            xmin, ymin = prop_corners_image_2d.min(0)
+            xmax, ymax = prop_corners_image_2d.max(0)
+            box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
+            uvdepth = np.zeros((1,3))
+            uvdepth[0,0:2] = box2d_center
+            uvdepth[0,2] = 20 # some random depth
+            box2d_center_rect = calib.project_image_to_rect(uvdepth)
+            frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
+                box2d_center_rect[0,0])
+        else:
+            obj_type = 'NonObject'
+            gt_box_3d = np.zeros((8, 3))
+            heading_angle = 0
+            box3d_size = np.zeros((1, 3))
+            frustum_angle = 0
+
+        #############
         rot_angle = self.get_center_view_rot_angle(frustum_angle)
 
         # Get point cloud
         if self.rotate_to_center:
-            point_set = self.get_center_view_point_set(pc, rot_angle)
+            point_set = self.get_center_view_point_set(pc_in_prop_box, rot_angle)
         else:
-            point_set = pc
+            point_set = pc_in_prop_box
         # empty point set
         if point_set.shape[0] == 0:
             point_set = np.array([[0.0, 0.0, 0.0, 0.0]])
@@ -300,12 +356,13 @@ class AvodDataset(object):
 
         # ------------------------------ LABELS ----------------------------
         # classification
-        assert(cls_type in ['Car', 'Pedestrian', 'Cyclist', 'NonObject'])
-        cls_label = g_type2onehotclass[cls_type]
+        # assert(obj_type in ['Car', 'Pedestrian', 'Cyclist', 'NonObject'])
+        assert(obj_type in type_whitelist)
+        cls_label = g_type2onehotclass[obj_type]
 
-        if seg.shape[0] == 0:
-            seg = np.array([0])
-        seg = seg[choice]
+        if seg_mask.shape[0] == 0:
+            seg_mask = np.array([0])
+        seg_mask = seg_mask[choice]
 
         # Get center point of 3D box
         if self.rotate_to_center:
@@ -318,13 +375,13 @@ class AvodDataset(object):
             heading_angle = heading_angle - rot_angle
 
         # Size
-        size_class, size_residual = size2class(box3d_size, cls_type)
+        size_class, size_residual = size2class(box3d_size, obj_type)
 
         angle_class, angle_residual = angle2class(heading_angle,
             NUM_HEADING_BIN)
 
         self.sample_id_counter += 1
-        return Sample(self.sample_id_counter, point_set, seg, box3d_center, angle_class, angle_residual,\
+        return Sample(self.sample_id_counter, point_set, seg_mask, box3d_center, angle_class, angle_residual,\
             size_class, size_residual, rot_angle, cls_label, proposal, heading_angle)
 
     def visualize_one_sample(self, pc_rect, pc_in_prop_box, gt_box_3d, prop_box_3d):
@@ -348,6 +405,21 @@ class AvodDataset(object):
         # mlab.imshow(bev_roi_features, colormap='gist_earth', name='bev_roi_features', figure=fig2)
         # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
         raw_input()
+
+    def get_proposal_from_label(self, label, calib, roi_features):
+        '''construct proposal from label'''
+        _, corners_3d = utils.compute_box_3d(label, calib.P)
+        # wrap ground truth with box parallel to axis
+        bev_box = corners_3d[:4, [0,2]]
+        xmax = bev_box[:, 0].max(axis=0)
+        ymax = bev_box[:, 1].max(axis=0)
+        xmin = bev_box[:, 0].min(axis=0)
+        ymin = bev_box[:, 1].min(axis=0)
+        l = xmax - xmin
+        w = ymax - ymin
+        h = label.h
+
+        return ProposalObject(list(label.t) + [l, w, h, 0.0], 1, label.type, roi_features)
 
     def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes, gt_boxes):
         import mayavi.mlab as mlab
@@ -399,98 +471,44 @@ class AvodDataset(object):
 
             if iou_with_gt < 0.65:
                 # non-object
-                obj_type = 'NonObject'
-                gt_box_3d = np.zeros((8, 3))
-                heading_angle = 0
-                box3d_size = np.zeros((1, 3))
-                frustum_angle = 0
-                # neg_proposals_in_frame.append(prop_corners_3d)
-
-                # get points within proposal box
-                # FIXME: sometimes this raise error
-                try:
-                    _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
-                except Exception as e:
-                    print(e)
-                    continue
-
-                pc_in_prop_box = pc_rect[prop_inds,:]
-                # shuffle points order
-                np.random.shuffle(pc_in_prop_box)
-                label = np.zeros((pc_in_prop_box.shape[0]))
-
-                # self.lock.acquire()
-                sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
-                    box3d_size, frustum_angle, prop_)
-                samples.append(sample)
-                neg_box.append(prop_corners_3d)
-                # self.lock.release()
+                sample = self.get_one_sample(prop_, pc_rect, calib, None, None)
+                if sample:
+                    samples.append(sample)
+                    # neg_box.append(prop_corners_3d)
             elif iou_with_gt >= 0.65:
-                recall[obj_idx] = 1
+                if self.roi_feature_ is None:
+                    self.roi_feature_ = prop_.roi_features
                 avg_iou.append(iou_with_gt)
                 for _ in range(self.augmentX):
                     prop = copy.deepcopy(prop_)
                     if self.perturb_prop:
                         prop = random_shift_box3d(prop)
-                    prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
-                    if prop_corners_image_2d is None:
-                        # print('skip proposal behind camera')
-                        continue
-                    # get points within proposal box
-                    # FIXME: sometimes this raise error
-                    try:
-                        _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
-                    except Exception as e:
-                        print(e)
-                        continue
-
-                    pc_in_prop_box = pc_rect[prop_inds,:]
-                    # shuffle points order
-                    np.random.shuffle(pc_in_prop_box)
-                    # segmentation label
-                    label = np.zeros((pc_in_prop_box.shape[0]))
-
-                    obj = objects[obj_idx]
-                    obj_type = obj.type
-                    gt_box_3d = gt_boxes_3d[obj_idx]
-
-                    # FIXME: sometimes this raise error
-                    try:
-                        _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
-                    except Exception as e:
-                        print(e)
-                        continue
-
-                    label[inds] = 1
-                    # Reject object without points
-                    if np.sum(label)==0:
-                        # print('Reject object without points')
-                        continue
-                    # pos_proposals_in_frame.append(prop_corners_3d)
-                    # Get 3D BOX heading
-                    heading_angle = obj.ry
-                    # Get 3D BOX size
-                    box3d_size = np.array([obj.l, obj.w, obj.h])
-                    # Get frustum angle
-                    xmin, ymin = prop_corners_image_2d.min(0)
-                    xmax, ymax = prop_corners_image_2d.max(0)
-                    box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
-                    uvdepth = np.zeros((1,3))
-                    uvdepth[0,0:2] = box2d_center
-                    uvdepth[0,2] = 20 # some random depth
-                    box2d_center_rect = calib.project_image_to_rect(uvdepth)
-                    frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
-                        box2d_center_rect[0,0])
-
-                    # self.lock.acquire()
-                    sample = self.get_one_sample(gt_box_3d, pc_in_prop_box, label, obj_type, heading_angle, \
-                        box3d_size, frustum_angle, prop)
-                    pos_idxs.append(len(samples))
-                    samples.append(sample)
-                    pos_box.append(prop_corners_3d)
-                # self.lock.release()
+                    sample = self.get_one_sample(prop, pc_rect, calib, gt_boxes_3d[obj_idx], objects[obj_idx])
+                    if sample:
+                        pos_idxs.append(len(samples))
+                        samples.append(sample)
+                        recall[obj_idx] = 1
+                        # pos_box.append(prop_corners_3d)
             else:
                 continue
+
+        # use groundtruth to generate proposal
+        if self.fill_with_label and self.roi_feature_ is not None:
+            for i in range(len(objects)):
+                if recall[i]:
+                    continue
+                # FIXME: use roi feature of the first found positive proposal now
+                gt_prop = self.get_proposal_from_label(objects[i], calib, self.roi_feature_)
+                for _ in range(self.augmentX):
+                    prop = copy.deepcopy(prop_)
+                    if self.perturb_prop:
+                        prop = random_shift_box3d(prop)
+                    sample = self.get_one_sample(prop, pc_rect, calib, gt_boxes_3d[i], objects[i])
+                    if sample:
+                        pos_idxs.append(len(samples))
+                        samples.append(sample)
+                        recall[i] = 1
+
         # self.visualize_proposals(pc_rect, pos_box, neg_box, gt_boxes_3d)
         self.load_progress += 1
         print('load {} samples, pos {}'.format(len(samples), len(pos_idxs)))
@@ -531,11 +549,14 @@ if __name__ == '__main__':
     if split == 'train':
         augmentX = 2
         perturb_prop = True
+        fill_with_label = True
     else:
         augmentX = 1
         perturb_prop = False
+        fill_with_label = True
     dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_0.65/'+split,
-                 augmentX=augmentX, random_shift=True, rotate_to_center=True, random_flip=True, perturb_prop=perturb_prop)
+                 augmentX=augmentX, random_shift=True, rotate_to_center=True, random_flip=True,
+                 perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()
 
     # produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly, args=(1.0,))
