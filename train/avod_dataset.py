@@ -45,7 +45,7 @@ def is_near(prop1, prop2):
 
 class Sample(object):
     def __init__(self, idx, point_set, seg, box3d_center, angle_class, angle_residual,\
-        size_class, size_residual, rot_angle, cls_label, proposal, heading_angle):
+        size_class, size_residual, rot_angle, cls_label, proposal, heading_angle, iou):
         self.idx = idx
         self.heading_angle = heading_angle
         self.point_set = point_set
@@ -60,6 +60,7 @@ class Sample(object):
         self.feature_vec = proposal.roi_features
         # corresponding proposal
         self.proposal = proposal
+        self.iou = iou
 
     def random_flip(self):
         if np.random.random()>0.5: # 50% chance flipping
@@ -282,7 +283,7 @@ class AvodDataset(object):
         box3d_center = (box3d[0,:] + box3d[6,:])/2.0
         return box3d_center
 
-    def get_one_sample(self, proposal, pc_rect, calib, gt_box_3d, gt_object):
+    def get_one_sample(self, proposal, pc_rect, calib, iou, gt_box_3d, gt_object):
         '''convert to frustum sample format'''
         prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(proposal, calib.P)
         if prop_corners_image_2d is None:
@@ -382,7 +383,7 @@ class AvodDataset(object):
 
         self.sample_id_counter += 1
         return Sample(self.sample_id_counter, point_set, seg_mask, box3d_center, angle_class, angle_residual,\
-            size_class, size_residual, rot_angle, cls_label, proposal, heading_angle)
+            size_class, size_residual, rot_angle, cls_label, proposal, heading_angle, iou)
 
     def visualize_one_sample(self, pc_rect, pc_in_prop_box, gt_box_3d, prop_box_3d):
         import mayavi.mlab as mlab
@@ -418,8 +419,18 @@ class AvodDataset(object):
         l = xmax - xmin
         w = ymax - ymin
         h = label.h
+        prop_obj = ProposalObject(list(label.t) + [l, w, h, 0.0], 1, label.type, roi_features)
+        _, corners_prop = utils.compute_box_3d(prop_obj, calib.P)
+        bev_box_prop = corners_prop[:4, [0,2]]
 
-        return ProposalObject(list(label.t) + [l, w, h, 0.0], 1, label.type, roi_features)
+        prop_poly = Polygon(bev_box_prop)
+        gt_poly = Polygon(bev_box)
+        intersection = prop_poly.intersection(gt_poly)
+        iou = intersection.area / (prop_poly.area + gt_poly.area - intersection.area)
+        # this iou maybe lower, force to use this for regression
+        if iou < 0.65:
+            iou = 0.65
+        return prop_obj, iou
 
     def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes, gt_boxes):
         import mayavi.mlab as mlab
@@ -469,26 +480,32 @@ class AvodDataset(object):
             # find corresponding label object
             obj_idx, iou_with_gt = self.find_match_label(prop_box_xy, gt_boxes_xy)
 
-            if iou_with_gt < 0.65:
+            # iou < 0.3 is no object, iou >= 0.5 is object, iou > 0.65 will be used to
+            # train regression
+            if iou_with_gt < 0.3:
                 # non-object
-                sample = self.get_one_sample(prop_, pc_rect, calib, None, None)
+                sample = self.get_one_sample(prop_, pc_rect, calib, iou_with_gt, None, None)
                 if sample:
                     samples.append(sample)
                     # neg_box.append(prop_corners_3d)
-            elif iou_with_gt >= 0.65:
+            elif iou_with_gt >= 0.5:
                 if self.roi_feature_ is None:
                     self.roi_feature_ = prop_.roi_features
                 avg_iou.append(iou_with_gt)
+
                 for _ in range(self.augmentX):
                     prop = copy.deepcopy(prop_)
                     if self.perturb_prop:
                         prop = random_shift_box3d(prop)
-                    sample = self.get_one_sample(prop, pc_rect, calib, gt_boxes_3d[obj_idx], objects[obj_idx])
+                    sample = self.get_one_sample(prop, pc_rect, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx])
                     if sample:
                         pos_idxs.append(len(samples))
                         samples.append(sample)
                         recall[obj_idx] = 1
                         # pos_box.append(prop_corners_3d)
+                    # only do augmentation for those iou >= 0.65
+                    if iou_with_gt < 0.65:
+                        break
             else:
                 continue
 
@@ -498,12 +515,12 @@ class AvodDataset(object):
                 if recall[i]:
                     continue
                 # FIXME: use roi feature of the first found positive proposal now
-                gt_prop = self.get_proposal_from_label(objects[i], calib, self.roi_feature_)
+                gt_prop, iou_with_gt = self.get_proposal_from_label(objects[i], calib, self.roi_feature_)
                 for _ in range(self.augmentX):
                     prop = copy.deepcopy(prop_)
                     if self.perturb_prop:
                         prop = random_shift_box3d(prop)
-                    sample = self.get_one_sample(prop, pc_rect, calib, gt_boxes_3d[i], objects[i])
+                    sample = self.get_one_sample(prop, pc_rect, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
                     if sample:
                         pos_idxs.append(len(samples))
                         samples.append(sample)
