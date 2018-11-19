@@ -113,7 +113,7 @@ def train():
     best_avg_cls_acc = 0
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
-            pointclouds_pl, features_pl, cls_labels_pl, labels_pl, centers_pl, \
+            pointclouds_pl, features_pl, cls_labels_pl, ious_pl, labels_pl, centers_pl, \
             heading_class_label_pl, heading_residual_label_pl, \
             size_class_label_pl, size_residual_label_pl = \
                 MODEL.placeholder_inputs(BATCH_SIZE, NUM_POINT)
@@ -131,7 +131,7 @@ def train():
             # Get model and losses
             end_points = MODEL.get_model(pointclouds_pl, cls_labels_pl, features_pl,
                 is_training_pl, bn_decay=bn_decay)
-            loss, loss_endpoints = MODEL.get_loss(cls_labels_pl, labels_pl, centers_pl,
+            loss, loss_endpoints = MODEL.get_loss(cls_labels_pl, ious_pl, labels_pl, centers_pl,
                 heading_class_label_pl, heading_residual_label_pl,
                 size_class_label_pl, size_residual_label_pl, end_points)
             tf.summary.scalar('loss', loss)
@@ -207,6 +207,7 @@ def train():
         ops = {'pointclouds_pl': pointclouds_pl,
                'features_pl': features_pl,
                'cls_label_pl': cls_labels_pl,
+               'ious_pl': ious_pl,
                'labels_pl': labels_pl,
                'centers_pl': centers_pl,
                'heading_class_label_pl': heading_class_label_pl,
@@ -322,7 +323,7 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
     # for batch_idx in range(num_batches):
     batch_idx = 0
     while(True):
-        batch_data, batch_cls_label, batch_label, batch_center, \
+        batch_data, batch_cls_label, batch_ious, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
         batch_rot_angle, batch_feature_vec, batch_frame_ids, is_last_batch = TRAIN_DATASET.get_next_batch()
@@ -334,6 +335,7 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
                      ops['cls_label_pl']: batch_cls_label,
+                     ops['ious_pl']: batch_ious,
                      ops['labels_pl']: batch_label,
                      ops['centers_pl']: batch_center,
                      ops['heading_class_label_pl']: batch_hclass,
@@ -441,7 +443,7 @@ def eval_one_epoch(sess, ops, test_writer):
     # for batch_idx in range(num_batches):
     num_batches = 0
     while(True):
-        batch_data, batch_cls_label, batch_label, batch_center, \
+        batch_data, batch_cls_label, batch_ious, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
         batch_rot_angle, batch_feature_vec, batch_frame_ids, is_last_batch = TEST_DATASET.get_next_batch()
@@ -453,6 +455,7 @@ def eval_one_epoch(sess, ops, test_writer):
         feed_dict = {ops['pointclouds_pl']: batch_data,
                      ops['features_pl']: batch_feature_vec,
                      ops['cls_label_pl']: batch_cls_label,
+                     ops['ious_pl']: batch_ious,
                      ops['labels_pl']: batch_label,
                      ops['centers_pl']: batch_center,
                      ops['heading_class_label_pl']: batch_hclass,

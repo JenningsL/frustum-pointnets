@@ -190,6 +190,7 @@ def placeholder_inputs(batch_size, num_point):
         shape=(batch_size, num_point, 4))
     features_pl = tf.placeholder(tf.float32, shape=(batch_size, 3136)) # TODO: don't hardcode feature_vector size
     cls_label_pl = tf.placeholder(tf.int32, shape=(batch_size,))
+    ious_pl = tf.placeholder(tf.float32, shape=(batch_size,))
 
     # labels_pl is for segmentation label
     seg_labels_pl = tf.placeholder(tf.int32, shape=(batch_size, num_point))
@@ -199,7 +200,7 @@ def placeholder_inputs(batch_size, num_point):
     size_class_label_pl = tf.placeholder(tf.int32, shape=(batch_size,))
     size_residual_label_pl = tf.placeholder(tf.float32, shape=(batch_size,3))
 
-    return pointclouds_pl, features_pl, cls_label_pl, seg_labels_pl, centers_pl, \
+    return pointclouds_pl, features_pl, cls_label_pl, ious_pl, seg_labels_pl, centers_pl, \
         heading_class_label_pl, heading_residual_label_pl, \
         size_class_label_pl, size_residual_label_pl
 
@@ -290,7 +291,7 @@ def get_center_regression_net(object_point_cloud, one_hot_vec,
     return predicted_center, end_points
 
 
-def get_loss(cls_label, mask_label, center_label, \
+def get_loss(cls_label, ious, mask_label, center_label, \
              heading_class_label, heading_residual_label, \
              size_class_label, size_residual_label, \
              end_points, \
@@ -298,7 +299,8 @@ def get_loss(cls_label, mask_label, center_label, \
              box_loss_weight=1.0):
     ''' Loss functions for 3D object detection.
     Input:
-        cls_label: TF int32 tensor in shape (B,NUM_OBJ_CLASSES)
+        cls_label: TF int32 tensor in shape (B,)
+        ious: TF int32 tensor in shape (B,)
         mask_label: TF int32 tensor in shape (B,N)
         center_label: TF tensor in shape (B,3)
         heading_class_label: TF int32 tensor in shape (B,)
@@ -316,7 +318,8 @@ def get_loss(cls_label, mask_label, center_label, \
     cls_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(\
         logits=end_points['cls_logits'], labels=cls_label))
     tf.summary.scalar('classification loss', cls_loss)
-    is_obj_mask = tf.to_float(tf.not_equal(cls_label, g_type2onehotclass['NonObject']))
+    iou_mask = tf.greater_equal(ious, 0.65)
+    is_obj_mask = tf.to_float(iou_mask)
     #cls_label_pred = tf.argmax(tf.nn.softmax(end_points['cls_logits']), axis=1)
     #is_obj_mask = tf.to_float(tf.not_equal(cls_label_pred, g_type2onehotclass['NonObject']))
     # 3D Segmentation loss

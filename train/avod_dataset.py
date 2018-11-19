@@ -224,6 +224,7 @@ class AvodDataset(object):
         bsize = len(samples) # note that bsize can be smaller than self.batch_size
         batch_data = np.zeros((bsize, self.npoints, self.num_channel))
         batch_cls_label = np.zeros((bsize,), dtype=np.int32)
+        batch_ious = np.zeros((bsize,), dtype=np.float32)
         batch_label = np.zeros((bsize, self.npoints), dtype=np.int32)
         batch_center = np.zeros((bsize, 3))
         batch_heading_class = np.zeros((bsize,), dtype=np.int32)
@@ -246,6 +247,7 @@ class AvodDataset(object):
             batch_data[i,...] = point_set
             batch_center[i,:] = box3d_center
             batch_cls_label[i] = sample.cls_label
+            batch_ious[i] = sample.iou
             batch_label[i,:] = sample.seg_label
             batch_heading_class[i] = sample.angle_class
             batch_heading_residual[i] = sample.angle_residual
@@ -254,7 +256,7 @@ class AvodDataset(object):
             batch_rot_angle[i] = sample.rot_angle
             batch_feature_vec[i] = sample.feature_vec
             frame_ids.append(sample.frame_id)
-        return batch_data, batch_cls_label, batch_label, batch_center, \
+        return batch_data, batch_cls_label, batch_ious, batch_label, batch_center, \
             batch_heading_class, batch_heading_residual, \
             batch_size_class, batch_size_residual, \
             batch_rot_angle, batch_feature_vec, frame_ids, is_last_batch
