@@ -346,7 +346,13 @@ def test(output_filename, result_dir=None):
             pickle.dump(detection_objects, fp)
     # Write detection results for KITTI evaluation
     write_detection_results(result_dir, detection_objects)
-    print('write detection results to ' + result_dir)
+    output_dir = os.path.join(result_dir, 'data')
+    print('write detection results to ' + output_dir)
+    # Make sure for each frame (no matter if we have measurment for that frame),
+    # there is a TXT file
+    to_fill_filename_list = [frame_id+'.txt' \
+            for frame_id in TEST_DATASET.frame_ids]
+    fill_files(output_dir, to_fill_filename_list)
     TEST_DATASET.stop_loading()
     val_loading_thread.join()
 
