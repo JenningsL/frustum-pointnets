@@ -63,7 +63,7 @@ def get_session_and_ops(batch_size, num_point):
     '''
     with tf.Graph().as_default():
         with tf.device('/gpu:'+str(GPU_INDEX)):
-            pointclouds_pl, features_pl, cls_labels_pl, labels_pl, centers_pl, \
+            pointclouds_pl, features_pl, cls_labels_pl, ious_pl, labels_pl, centers_pl, \
             heading_class_label_pl, heading_residual_label_pl, \
             size_class_label_pl, size_residual_label_pl = \
                 MODEL.placeholder_inputs(BATCH_SIZE, NUM_POINT)
