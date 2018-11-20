@@ -18,7 +18,7 @@ from prepare_data import extract_pc_in_box3d
 from kitti_object_avod import *
 import kitti_util as utils
 from model_util import g_type2class, g_class2type, g_type2onehotclass, g_type_mean_size
-from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER
+from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER, REG_IOU
 from model_util import type_whitelist
 from provider import *
 from shapely.geometry import Polygon, MultiPolygon
@@ -94,7 +94,7 @@ class AvodDataset(object):
             os.makedirs(save_dir)
         self.fill_with_label = fill_with_label
         self.num_channel = 4
-        rpn_output_path = os.path.join(kitti_path, 'training/proposal')
+        rpn_output_path = os.path.join(kitti_path, 'training/proposal_car_people')
         def is_prop_file(f):
             return os.path.isfile(os.path.join(rpn_output_path, f)) and not '_roi' in f
         proposal_files = [f for f in os.listdir(rpn_output_path) if is_prop_file(f)]
@@ -430,8 +430,8 @@ class AvodDataset(object):
         intersection = prop_poly.intersection(gt_poly)
         iou = intersection.area / (prop_poly.area + gt_poly.area - intersection.area)
         # this iou maybe lower, force to use this for regression
-        if iou < 0.65:
-            iou = 0.65
+        if iou < REG_IOU:
+            iou = REG_IOU
         return prop_obj, iou
 
     def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes, gt_boxes):
@@ -505,8 +505,8 @@ class AvodDataset(object):
                         samples.append(sample)
                         recall[obj_idx] = 1
                         # pos_box.append(prop_corners_3d)
-                    # only do augmentation for those iou >= 0.65
-                    if iou_with_gt < 0.65:
+                    # only do augmentation for those iou >= REG_IOU
+                    if iou_with_gt < REG_IOU:
                         break
             else:
                 continue
@@ -573,7 +573,7 @@ if __name__ == '__main__':
         augmentX = 1
         perturb_prop = False
         fill_with_label = True
-    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_0.65/'+split,
+    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
                  augmentX=augmentX, random_shift=True, rotate_to_center=True, random_flip=True,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()

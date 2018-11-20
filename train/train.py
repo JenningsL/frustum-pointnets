@@ -72,13 +72,13 @@ BN_DECAY_CLIP = 0.99
 
 # load data set in background thread, remember to join data_loading_thread somewhere
 TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_0.65/train',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/train',
              augmentX=2, random_shift=True, rotate_to_center=True, random_flip=True)
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_0.65/val',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 train_loading_thread = Thread(target=TRAIN_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio, False))
-val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio, True))
+val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio, False))
 train_loading_thread.start()
 val_loading_thread.start()
 

@@ -11,22 +11,23 @@ import tf_util
 # -----------------
 
 NUM_SEG_CLASSES = 2 # segmentation has two classes
-# NUM_OBJ_CLASSES = 4 # classification
-NUM_OBJ_CLASSES = 2
+NUM_OBJ_CLASSES = 4 # classification
+# NUM_OBJ_CLASSES = 2
 NUM_HEADING_BIN = 12
 #NUM_SIZE_CLUSTER = 9 # one cluster for each type
 NUM_OBJECT_POINT = 512
+REG_IOU = 0.55
 # type_whitelist = ['Car', 'Pedestrian', 'Cyclist', 'NonObject']
 type_whitelist = ['Car', 'NonObject']
 '''
 g_type2class={'Car':0, 'Van':1, 'Truck':2, 'Pedestrian':3,
               'Person_sitting':4, 'Cyclist':5, 'Tram':6, 'Misc':7, 'NonObject': 8}
 '''
-g_type2class={'Car':0, 'NonObject': 1}
+g_type2class = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2, 'NonObject': 3}
+# g_type2class={'Car':0, 'NonObject': 1}
 g_class2type = {g_type2class[t]:t for t in g_type2class}
-# g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2, 'NonObject': 3}
-g_type2onehotclass = {'Car': 0, 'NonObject': 1}
-'''
+g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2, 'NonObject': 3}
+# g_type2onehotclass = {'Car': 0, 'NonObject': 1}
 g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
                     'Van': np.array([5.06763659,1.9007158,2.20532825]),
                     'Truck': np.array([10.13586957,2.58549199,3.2520595]),
@@ -38,6 +39,7 @@ g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462])
                     'NonObject': np.array([1.0, 1.0, 1.0])}
 '''
 g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462]), 'NonObject': np.array([1.0, 1.0, 1.0])}
+'''
 NUM_SIZE_CLUSTER = len(g_type_mean_size.keys())
 g_mean_size_arr = np.zeros((NUM_SIZE_CLUSTER, 3)) # size clustrs
 for i in range(NUM_SIZE_CLUSTER):
@@ -318,7 +320,7 @@ def get_loss(cls_label, ious, mask_label, center_label, \
     cls_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(\
         logits=end_points['cls_logits'], labels=cls_label))
     tf.summary.scalar('classification loss', cls_loss)
-    iou_mask = tf.greater_equal(ious, 0.65)
+    iou_mask = tf.greater_equal(ious, REG_IOU)
     is_obj_mask = tf.to_float(iou_mask)
     #cls_label_pred = tf.argmax(tf.nn.softmax(end_points['cls_logits']), axis=1)
     #is_obj_mask = tf.to_float(tf.not_equal(cls_label_pred, g_type2onehotclass['NonObject']))
