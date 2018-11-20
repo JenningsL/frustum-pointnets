@@ -52,7 +52,7 @@ MODEL = importlib.import_module(FLAGS.model)
 NUM_CHANNEL = 4
 
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_0.65/val',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 
 kitti_dataset = kitti_object('/data/ssd/public/jlliu/Kitti/object')
@@ -295,7 +295,7 @@ def test(output_filename, result_dir=None):
     batch_idx = 0
     # TODO: return frame_id_list in get_next_batch
     while(True):
-        batch_data, batch_cls_label, batch_label, batch_center, \
+        batch_data, batch_cls_label, batch_ious, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
         batch_rot_angle, batch_feature_vec, batch_frame_ids, is_last_batch = TEST_DATASET.get_next_batch()
