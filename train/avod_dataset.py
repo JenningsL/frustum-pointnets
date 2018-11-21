@@ -524,7 +524,7 @@ class AvodDataset(object):
                 # FIXME: use roi feature of the first found positive proposal now
                 gt_prop, iou_with_gt = self.get_proposal_from_label(objects[i], calib, self.roi_feature_)
                 for _ in range(self.augmentX):
-                    prop = copy.deepcopy(prop_)
+                    prop = copy.deepcopy(gt_prop)
                     if self.perturb_prop:
                         prop = random_shift_box3d(prop)
                     sample = self.get_one_sample(prop, pc_rect, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
