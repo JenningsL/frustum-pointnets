@@ -105,7 +105,7 @@ class kitti_object_avod(kitti_object):
         self.calib_dir = os.path.join(self.split_dir, 'calib')
         self.lidar_dir = os.path.join(self.split_dir, 'velodyne')
         self.label_dir = os.path.join(self.split_dir, 'label_2')
-        self.proposal_dir = os.path.join(self.split_dir, 'proposal')
+        self.proposal_dir = os.path.join(self.split_dir, 'proposal_car_people')
 
         # self.num_samples = len(os.listdir(self.image_dir))
         # print(self.num_samples)

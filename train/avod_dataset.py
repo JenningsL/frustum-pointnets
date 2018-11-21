@@ -130,8 +130,12 @@ class AvodDataset(object):
         recall = 0
         has_obj_count = 0
         avg_iou = []
+        type_count = {t: 0 for t in type_whitelist if t != 'NonObject'}
         for frame_id in self.frame_ids:
             frame_data = self.load_frame_data(frame_id)
+            for sample in frame_data['samples']:
+                if sample.cls_label != g_type2onehotclass['NonObject']:
+                    type_count[g_class2type[sample.cls_label]] += 1
             if 'recall' in frame_data:
                 has_obj_count += 1
                 recall += frame_data['recall']
@@ -147,6 +151,7 @@ class AvodDataset(object):
             neg_count += len(frame_data['samples']) - len(frame_data['pos_idxs'])
         print('preprocess done, cost time: {}'.format(time.time() - start))
         print('pos: {}, neg: {}'.format(pos_count, neg_count))
+        print('sample of each class: ', type_count)
         print('recall: {}'.format(recall/has_obj_count))
         print('Avg iou: {}'.format(np.mean(avg_iou)))
         print('Avg points: {}, pos_ratio: {}'.format(npoints/pos_count, obj_points/npoints))
