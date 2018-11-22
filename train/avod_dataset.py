@@ -170,8 +170,16 @@ class AvodDataset(object):
         elif pos_ratio == 1.0:
             keep_idxs = pos_idxs
         else:
+            cyclist_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Cyclist']]
+            pedestrian_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Pedestrian']]
+            car_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Car']]
+            # downsample
+            car_idxs = random.sample(car_idxs, int(len(car_idxs) * 0.5))
+            # oversample
+            cyclist_idxs = cyclist_idxs * 10
+            pedestrian_idxs = pedestrian_idxs * 5
             need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio)) + 10
-            keep_idxs = pos_idxs + neg_idxs[:need_neg]
+            keep_idxs = car_idxs + cyclist_idxs + pedestrian_idxs + neg_idxs[:need_neg]
         random.shuffle(keep_idxs)
         p = 0
         n = 0
