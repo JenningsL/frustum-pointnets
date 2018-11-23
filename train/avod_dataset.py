@@ -162,7 +162,7 @@ class AvodDataset(object):
         neg_idxs = [i for i in range(0, len(samples)) if i not in pos_idxs]
         random.shuffle(neg_idxs)
         if is_eval:
-            #need_neg = int(len(neg_idxs) * 0.5)
+            # need_neg = int(len(neg_idxs) * 0.5)
             need_neg = len(neg_idxs)
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
         elif pos_ratio == 0.0:
@@ -170,6 +170,15 @@ class AvodDataset(object):
         elif pos_ratio == 1.0:
             keep_idxs = pos_idxs
         else:
+            cyclist_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Cyclist']]
+            pedestrian_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Pedestrian']]
+            car_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Car']]
+            # downsample
+            car_idxs = random.sample(car_idxs, int(len(car_idxs) * 0.5))
+            # oversample
+            cyclist_idxs = cyclist_idxs * 10
+            pedestrian_idxs = pedestrian_idxs * 5
+            pos_idxs = car_idxs + cyclist_idxs + pedestrian_idxs
             need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio)) + 10
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
         random.shuffle(keep_idxs)
