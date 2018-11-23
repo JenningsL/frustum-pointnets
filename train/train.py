@@ -326,7 +326,8 @@ def train_one_epoch(sess, ops, train_writer, idxs_to_use=None):
         batch_data, batch_cls_label, batch_ious, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec, batch_frame_ids, is_last_batch = TRAIN_DATASET.get_next_batch()
+        batch_rot_angle, batch_feature_vec, batch_frame_ids, \
+        batch_proposal_score, is_last_batch = TRAIN_DATASET.get_next_batch()
 
         if is_last_batch and len(batch_data) != BATCH_SIZE:
             # discard last batch with fewer data
@@ -446,7 +447,8 @@ def eval_one_epoch(sess, ops, test_writer):
         batch_data, batch_cls_label, batch_ious, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec, batch_frame_ids, is_last_batch = TEST_DATASET.get_next_batch()
+        batch_rot_angle, batch_feature_vec, batch_frame_ids, \
+        batch_proposal_score, is_last_batch = TEST_DATASET.get_next_batch()
 
         if is_last_batch and len(batch_data) != BATCH_SIZE:
             # discard last batch with fewer data

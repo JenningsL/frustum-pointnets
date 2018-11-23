@@ -166,13 +166,13 @@ def get_calibration(idx):
 def to_detection_objects(id_list, type_list, center_list, \
                         heading_cls_list, heading_res_list, \
                         size_cls_list, size_res_list, \
-                        rot_angle_list, score_list, prob_list):
+                        rot_angle_list, score_list, prob_list, proposal_score_list):
     objects = {}
     for i in range(len(center_list)):
         if type_list[i] == 'NonObject':
             continue
         idx = id_list[i]
-        score = score_list[i]
+        score = score_list[i] + np.log(proposal_score_list[i])
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(center_list[i],
             heading_cls_list[i], heading_res_list[i],
             size_cls_list[i], size_res_list[i], rot_angle_list[i])
@@ -189,6 +189,7 @@ def to_detection_objects(id_list, type_list, center_list, \
         obj.box_2d = [x1,y1,x2,y2]
         obj.box_3d = box3d_pts_3d
         obj.probs = prob_list[i]
+        obj.proposal_score = proposal_score_list[i]
 
         if idx not in objects:
             objects[idx] = []
@@ -271,7 +272,7 @@ def test_from_pickle(output_filename, result_dir=None):
         for det in detections:
             # use max iou as score, which show the best regression performance
             '''
-            box3d_pts_2d, box3d_pts_3d = utils.compute_box_3d(det, calib.P) 
+            box3d_pts_2d, box3d_pts_3d = utils.compute_box_3d(det, calib.P)
             bev_box = box3d_pts_3d[:4, [0,2]]
             _, iou = find_match_label(bev_box, gt_boxes_xy)
             det.score = iou
@@ -303,6 +304,7 @@ def test(output_filename, result_dir=None):
     score_list = []
     prob_list = []
     frame_id_list = []
+    proposal_score_list = []
 
     total_tp = 0
     total_fp = 0
@@ -316,7 +318,8 @@ def test(output_filename, result_dir=None):
         batch_data, batch_cls_label, batch_ious, batch_label, batch_center, \
         batch_hclass, batch_hres, \
         batch_sclass, batch_sres, \
-        batch_rot_angle, batch_feature_vec, batch_frame_ids, is_last_batch = TEST_DATASET.get_next_batch()
+        batch_rot_angle, batch_feature_vec, batch_frame_ids, \
+        batch_proposal_score, is_last_batch = TEST_DATASET.get_next_batch()
 
         if is_last_batch and len(batch_data) != BATCH_SIZE:
             # discard last batch with fewer data
@@ -352,13 +355,15 @@ def test(output_filename, result_dir=None):
             rot_angle_list.append(batch_rot_angle[i])
             score_list.append(batch_scores[i])
             prob_list.append(batch_prob[i])
+            proposal_score_list.append(batch_proposal_score[i])
         frame_id_list += map(lambda fid: int(fid), batch_frame_ids)
 
     type_list = map(lambda i: type_whitelist[i], cls_list)
 
     detection_objects = to_detection_objects(frame_id_list, type_list,
         center_list, heading_cls_list, heading_res_list,
-        size_cls_list, size_res_list, rot_angle_list, score_list, prob_list)
+        size_cls_list, size_res_list, rot_angle_list, score_list, prob_list,
+        proposal_score_list)
     if FLAGS.dump_result:
         with open(output_filename, 'wp') as fp:
             pickle.dump(detection_objects, fp)

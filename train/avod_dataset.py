@@ -248,6 +248,7 @@ class AvodDataset(object):
         batch_rot_angle = np.zeros((bsize,))
         batch_feature_vec = np.zeros((bsize, samples[0].feature_vec.shape[0]))
         frame_ids = []
+        batch_proposal_score = np.zeros((bsize,), dtype=np.float32)
         for i in range(bsize):
             sample = samples[i]
             point_set = copy.deepcopy(sample.point_set[:,0:self.num_channel])
@@ -270,10 +271,11 @@ class AvodDataset(object):
             batch_rot_angle[i] = sample.rot_angle
             batch_feature_vec[i] = sample.feature_vec
             frame_ids.append(sample.frame_id)
+            batch_proposal_score[i] = sample.proposal.score
         return batch_data, batch_cls_label, batch_ious, batch_label, batch_center, \
             batch_heading_class, batch_heading_residual, \
             batch_size_class, batch_size_residual, \
-            batch_rot_angle, batch_feature_vec, frame_ids, is_last_batch
+            batch_rot_angle, batch_feature_vec, frame_ids, batch_proposal_score, is_last_batch
 
     def get_center_view_rot_angle(self, frustum_angle):
         ''' Get the frustum rotation angle, it isshifted by pi/2 so that it
@@ -598,7 +600,7 @@ if __name__ == '__main__':
     # while(True):
     #     batch = dataset.get_next_batch()
     #     is_last_batch = batch[-1]
-    #     print(batch[1])
+    #     print(batch[-2])
     #     if is_last_batch:
     #         break
     # dataset.stop_loading()
