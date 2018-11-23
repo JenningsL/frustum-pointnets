@@ -15,6 +15,7 @@ import numpy as np
 import tensorflow as tf
 import cPickle as pickle
 from threading import Thread
+from shapely.geometry import Polygon
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
@@ -52,6 +53,7 @@ MODEL = importlib.import_module(FLAGS.model)
 NUM_CHANNEL = 4
 
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
+             #save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people_no_filling/val',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 
@@ -118,15 +120,17 @@ def inference(sess, ops, pc, feature_vec, cls_label):
             feed_dict=feed_dict)
 
     # Compute scores
+    smooth = 0.000001
     batch_cls_prob = np.max(softmax(cls_logits),1) # B,
     batch_seg_prob = softmax(logits)[:,:,1] # BxN
     batch_seg_mask = np.argmax(logits, 2) # BxN
     mask_mean_prob = np.sum(batch_seg_prob * batch_seg_mask, 1) # B,
-    mask_mean_prob = mask_mean_prob / np.sum(batch_seg_mask,1) # B,
+    mask_mean_prob = mask_mean_prob / (np.sum(batch_seg_mask,1) + smooth) # B,
     heading_prob = np.max(softmax(heading_logits),1) # B
     size_prob = np.max(softmax(size_logits),1) # B,
-    # scores = np.log(mask_mean_prob) + np.log(heading_prob) + np.log(size_prob)
-    scores = (batch_cls_prob + mask_mean_prob + heading_prob + size_prob) / 4
+    scores = np.log(batch_cls_prob) + np.log(mask_mean_prob + smooth) + np.log(heading_prob) + np.log(size_prob)
+    #scores = (batch_cls_prob + mask_mean_prob + heading_prob + size_prob) / 4
+    probs = np.column_stack((batch_cls_prob, mask_mean_prob, heading_prob, size_prob))
     # Finished computing scores
 
     type_cls = np.argmax(cls_logits, 1)
@@ -138,7 +142,7 @@ def inference(sess, ops, pc, feature_vec, cls_label):
         for i in range(pc.shape[0])])
 
     return type_cls, centers, heading_cls, heading_res, \
-        size_cls, size_res, scores
+        size_cls, size_res, scores, probs
 
 class DetectObject(object):
     def __init__(self, h,w,l,tx,ty,tz,ry, frame_id, type_label, score, box_2d=None, box_3d=None):
@@ -162,7 +166,7 @@ def get_calibration(idx):
 def to_detection_objects(id_list, type_list, center_list, \
                         heading_cls_list, heading_res_list, \
                         size_cls_list, size_res_list, \
-                        rot_angle_list, score_list):
+                        rot_angle_list, score_list, prob_list):
     objects = {}
     for i in range(len(center_list)):
         if type_list[i] == 'NonObject':
@@ -184,6 +188,7 @@ def to_detection_objects(id_list, type_list, center_list, \
         y2 = np.amax(box3d_pts_2d, axis=0)[1]
         obj.box_2d = [x1,y1,x2,y2]
         obj.box_3d = box3d_pts_3d
+        obj.probs = prob_list[i]
 
         if idx not in objects:
             objects[idx] = []
@@ -234,34 +239,46 @@ def nms_on_bev(objects, iou_threshold=0.1):
         objects[idx] = [obj_list[i] for i in nms_idxs]
     return objects
 
+def find_match_label(prop_corners, labels_corners):
+    labels = map(lambda corners: Polygon(corners), labels_corners)
+    target = Polygon(prop_corners)
+    largest_iou = 0
+    largest_idx = -1
+    for i, label in enumerate(labels):
+	area1 = label.area
+	area2 = target.area
+	intersection = target.intersection(label).area
+	iou = intersection / (area1 + area2 - intersection)
+	if iou > largest_iou:
+            largest_iou = iou
+            largest_idx = i
+    return largest_idx, largest_iou
+
 def test_from_pickle(output_filename, result_dir=None):
-    ps_list = []
-    cls_list = []
-    center_list = []
-    heading_cls_list = []
-    heading_res_list = []
-    size_cls_list = []
-    size_res_list = []
-    rot_angle_list = []
-    score_list = []
-    frame_id_list = []
     with open(output_filename, 'rp') as fp:
-        ps_list = pickle.load(fp)
-        cls_list = pickle.load(fp)
-        center_list = pickle.load(fp)
-        heading_cls_list = pickle.load(fp)
-        heading_res_list = pickle.load(fp)
-        size_cls_list = pickle.load(fp)
-        size_res_list = pickle.load(fp)
-        rot_angle_list = pickle.load(fp)
-        score_list = pickle.load(fp)
-        frame_id_list = pickle.load(fp)
+        detection_objects = pickle.load(fp)
 
-    type_list = map(lambda i: type_whitelist[i], cls_list)
-
-    detection_objects = to_detection_objects(frame_id_list, type_list,
-        center_list, heading_cls_list, heading_res_list,
-        size_cls_list, size_res_list, rot_angle_list, score_list)
+    for frame_id, detections in detection_objects.items():
+        calib = get_calibration(int(frame_id))
+        labels = kitti_dataset.get_label_objects(int(frame_id))
+        gt_boxes_xy = []
+        gt_boxes_3d = []
+        objects = filter(lambda obj: obj.type in type_whitelist, labels)
+        for obj in objects:
+            _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
+            gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
+            gt_boxes_3d.append(gt_corners_3d)
+        for det in detections:
+            # use max iou as score, which show the best regression performance
+            '''
+            box3d_pts_2d, box3d_pts_3d = utils.compute_box_3d(det, calib.P) 
+            bev_box = box3d_pts_3d[:4, [0,2]]
+            _, iou = find_match_label(bev_box, gt_boxes_xy)
+            det.score = iou
+            '''
+            # batch_cls_prob, mask_mean_prob, heading_prob, size_prob
+            #det.score = np.log(det.probs[0]) + np.log(det.probs[2]) + np.log(det.probs[3])
+            det.score = np.log(det.probs[0])
     detection_objects = nms_on_bev(detection_objects, 0.01)
     # Write detection results for KITTI evaluation
     write_detection_results(result_dir, detection_objects)
@@ -284,6 +301,7 @@ def test(output_filename, result_dir=None):
     size_res_list = []
     rot_angle_list = []
     score_list = []
+    prob_list = []
     frame_id_list = []
 
     total_tp = 0
@@ -311,7 +329,7 @@ def test(output_filename, result_dir=None):
         # Run one batch inference
     	batch_cls, batch_center_pred, \
             batch_hclass_pred, batch_hres_pred, \
-            batch_sclass_pred, batch_sres_pred, batch_scores = \
+            batch_sclass_pred, batch_sres_pred, batch_scores, batch_prob = \
             inference(sess, ops, batch_data, batch_feature_vec, batch_cls_label)
 
         tp = np.sum(np.logical_and(batch_cls == batch_cls_label, batch_cls_label < g_type2onehotclass['NonObject']))
@@ -333,17 +351,18 @@ def test(output_filename, result_dir=None):
             size_res_list.append(batch_sres_pred[i,:])
             rot_angle_list.append(batch_rot_angle[i])
             score_list.append(batch_scores[i])
+            prob_list.append(batch_prob[i])
         frame_id_list += map(lambda fid: int(fid), batch_frame_ids)
 
     type_list = map(lambda i: type_whitelist[i], cls_list)
 
     detection_objects = to_detection_objects(frame_id_list, type_list,
         center_list, heading_cls_list, heading_res_list,
-        size_cls_list, size_res_list, rot_angle_list, score_list)
-    detection_objects = nms_on_bev(detection_objects, 0.01)
+        size_cls_list, size_res_list, rot_angle_list, score_list, prob_list)
     if FLAGS.dump_result:
         with open(output_filename, 'wp') as fp:
             pickle.dump(detection_objects, fp)
+    detection_objects = nms_on_bev(detection_objects, 0.01)
     # Write detection results for KITTI evaluation
     write_detection_results(result_dir, detection_objects)
     output_dir = os.path.join(result_dir, 'data')
@@ -353,6 +372,7 @@ def test(output_filename, result_dir=None):
     to_fill_filename_list = [frame_id+'.txt' \
             for frame_id in TEST_DATASET.frame_ids]
     fill_files(output_dir, to_fill_filename_list)
+    sys.exit(0)
     TEST_DATASET.stop_loading()
     val_loading_thread.join()
 

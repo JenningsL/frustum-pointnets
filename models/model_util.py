@@ -425,7 +425,7 @@ def get_loss(cls_label, ious, mask_label, center_label, \
     tf.summary.scalar('corners loss', corners_loss)
 
     # Weighted sum of all losses
-    total_loss = cls_loss*20 + mask_loss + box_loss_weight * (center_loss + \
+    total_loss = cls_loss + mask_loss + box_loss_weight * (center_loss + \
         heading_class_loss + size_class_loss + \
         heading_residual_normalized_loss*20 + \
         size_residual_normalized_loss*20 + \
