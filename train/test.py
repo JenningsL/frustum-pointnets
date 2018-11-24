@@ -228,17 +228,40 @@ def fill_files(output_dir, to_fill_filename_list):
             fout = open(filepath, 'w')
             fout.close()
 
+def get_iou(bev_box1, bev_box2):
+    p1 = Polygon(bev_box1)
+    p2 = Polygon(bev_box2)
+    intersection = p1.intersection(p2).area
+    return intersection / (p1.area + p2.area - intersection)
+
+def group_overlaps(detections, calib, iou_thres=0.01):
+    bev_boxes = map(lambda obj: utils.compute_box_3d(obj, calib.P)[1][:4, [0,2]], detections)
+    groups = []
+    candidates = range(len(detections))
+    while len(candidates) > 0:
+        idx = candidates[0]
+        group = [idx]
+        for i in candidates[1:]:
+            if get_iou(bev_boxes[idx], bev_boxes[i]) >= iou_thres:
+                group.append(i)
+        for j in group:
+            candidates.remove(j)
+        groups.append(map(lambda i: detections[i], group))
+    return groups
+
 def nms_on_bev(objects, iou_threshold=0.1):
-    for idx, obj_list in objects.items():
-        scores = map(lambda obj:obj.score, obj_list)
-        corners = map(lambda obj:obj.box_3d, obj_list)
-        bev_boxes = list(map(lambda p: [np.amin(p[0],axis=0)[0], np.amin(p[0], axis=0)[2], np.amax(p[0], axis=0)[0], np.amax(p[0], axis=0)[2], p[1]], zip(corners, scores)))
-        bev_boxes = np.array(bev_boxes)
-        #print('final output before nms: {0}'.format(len(bev_boxes)))
-        nms_idxs = non_max_suppression(bev_boxes, iou_threshold)
-        #print('final output after nms: {0}'.format(len(nms_idxs)))
-        objects[idx] = [obj_list[i] for i in nms_idxs]
-    return objects
+    final_result = {}
+    for frame_id, obj_list in objects.items():
+        final_result[frame_id] = []
+        calib = get_calibration(int(frame_id))
+        detections = filter(lambda d: d.score > np.log(0.5**4) and d.probs[2] >= 0.3, detections)
+        groups = group_overlaps(detections, calib, iou_threshold)
+        for group in groups:
+            # highest score
+            group = sorted(group, key=lambda o: o.score, reverse=True)
+            keep = group[0]
+            final_result[frame_id].append(keep)
+    return final_result
 
 def find_match_label(prop_corners, labels_corners):
     labels = map(lambda corners: Polygon(corners), labels_corners)
@@ -254,36 +277,6 @@ def find_match_label(prop_corners, labels_corners):
             largest_iou = iou
             largest_idx = i
     return largest_idx, largest_iou
-
-def test_from_pickle(output_filename, result_dir=None):
-    with open(output_filename, 'rp') as fp:
-        detection_objects = pickle.load(fp)
-
-    for frame_id, detections in detection_objects.items():
-        calib = get_calibration(int(frame_id))
-        labels = kitti_dataset.get_label_objects(int(frame_id))
-        gt_boxes_xy = []
-        gt_boxes_3d = []
-        objects = filter(lambda obj: obj.type in type_whitelist, labels)
-        for obj in objects:
-            _, gt_corners_3d = utils.compute_box_3d(obj, calib.P)
-            gt_boxes_xy.append(gt_corners_3d[:4, [0,2]])
-            gt_boxes_3d.append(gt_corners_3d)
-        for det in detections:
-            # use max iou as score, which show the best regression performance
-            '''
-            box3d_pts_2d, box3d_pts_3d = utils.compute_box_3d(det, calib.P)
-            bev_box = box3d_pts_3d[:4, [0,2]]
-            _, iou = find_match_label(bev_box, gt_boxes_xy)
-            det.score = iou
-            '''
-            # batch_cls_prob, mask_mean_prob, heading_prob, size_prob
-            #det.score = np.log(det.probs[0]) + np.log(det.probs[2]) + np.log(det.probs[3])
-            det.score = np.log(det.probs[0])
-    detection_objects = nms_on_bev(detection_objects, 0.01)
-    # Write detection results for KITTI evaluation
-    write_detection_results(result_dir, detection_objects)
-
 
 def test(output_filename, result_dir=None):
     ''' Test frustum pointents with 2D boxes from a RGB detector.
@@ -383,4 +376,3 @@ def test(output_filename, result_dir=None):
 
 if __name__=='__main__':
     test(FLAGS.output+'.pickle', FLAGS.output)
-    #test_from_pickle(FLAGS.output+'.pickle', FLAGS.output)
