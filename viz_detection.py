@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -51,7 +52,7 @@ def load_result(dataset, fname, data_idx):
             h,w,l = (float(cols[8]), float(cols[9]), float(cols[10]))
             tx,ty,tz = (float(cols[11]), float(cols[12]), float(cols[13]))
             ry = float(cols[14])
-            score = float(cols[15])
+            score = np.exp(float(cols[15]))
             obj = DetectObject(h,w,l,tx,ty,tz,ry,data_idx,type_label,score)
             objs.append(obj)
     return objs
