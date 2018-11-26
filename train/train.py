@@ -18,7 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
-from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES, g_type2onehotclass
+from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES, g_type2onehotclass, NUM_CHANNEL
 from avod_dataset import AvodDataset, Sample
 import provider
 from train_util import get_batch
@@ -54,7 +54,7 @@ MOMENTUM = FLAGS.momentum
 OPTIMIZER = FLAGS.optimizer
 DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
-NUM_CHANNEL = 3 if FLAGS.no_intensity else 4 # point feature channel
+# NUM_CHANNEL = 3 if FLAGS.no_intensity else 4 # point feature channel
 
 MODEL = importlib.import_module(FLAGS.model) # import network module
 MODEL_FILE = os.path.join(ROOT_DIR, 'models', FLAGS.model+'.py')

@@ -16,6 +16,7 @@ NUM_OBJ_CLASSES = 4 # classification
 NUM_HEADING_BIN = 12
 #NUM_SIZE_CLUSTER = 9 # one cluster for each type
 NUM_OBJECT_POINT = 512
+NUM_CHANNEL = 7
 REG_IOU = 0.55
 type_whitelist = ['Car', 'Pedestrian', 'Cyclist', 'NonObject']
 # type_whitelist = ['Car', 'NonObject']

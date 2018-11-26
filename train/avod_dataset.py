@@ -93,7 +93,7 @@ class AvodDataset(object):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         self.fill_with_label = fill_with_label
-        self.num_channel = 4
+        self.num_channel = 7
         rpn_output_path = os.path.join(kitti_path, 'training/proposal_car_people')
         def is_prop_file(f):
             return os.path.isfile(os.path.join(rpn_output_path, f)) and not '_roi' in f
@@ -301,7 +301,7 @@ class AvodDataset(object):
         box3d_center = (box3d[0,:] + box3d[6,:])/2.0
         return box3d_center
 
-    def get_one_sample(self, proposal, pc_rect, calib, iou, gt_box_3d, gt_object):
+    def get_one_sample(self, proposal, pc_rect, image, calib, iou, gt_box_3d, gt_object):
         '''convert to frustum sample format'''
         prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(proposal, calib.P)
         if prop_corners_image_2d is None:
@@ -361,14 +361,35 @@ class AvodDataset(object):
         #############
         rot_angle = self.get_center_view_rot_angle(frustum_angle)
 
+        ### RGB
+        point_set_rgb = np.zeros((pc_in_prop_box.shape[0], pc_in_prop_box.shape[1]+3))
+        image_points = calib.project_rect_to_image(pc_in_prop_box[:,:3])
+        for i, pt in enumerate(image_points):
+            x, y = pt
+            if x < 0 or x >= image.shape[1] or y < 0 or y >= image.shape[0]:
+                rgb = np.array([0.0,0.0,0.0])
+            else:
+                rgb = image[int(y)][int(x)].astype(np.float32) / 255
+            point_set_rgb[i] = np.concatenate((pc_in_prop_box[i], rgb), axis=0)
         # Get point cloud
         if self.rotate_to_center:
-            point_set = self.get_center_view_point_set(pc_in_prop_box, rot_angle)
+            point_set = self.get_center_view_point_set(point_set_rgb, rot_angle)
         else:
-            point_set = pc_in_prop_box
+            point_set = point_set_rgb
+
+        # if obj_type == 'Pedestrian':
+        #     img_show = np.zeros(image.shape)
+        #     image_points = calib.project_rect_to_image(point_set[:,:3])
+        #     for i, pt in enumerate(image_points):
+        #         x, y = pt
+        #         if x < 0 or x >= image.shape[1] or y < 0 or y >= image.shape[0]:
+        #             continue
+        #         img_show[int(y)][int(x)] = point_set[i, 4:]
+        #     cv2.imshow('image',img_show)
+        #     cv2.waitKey(0)
         # empty point set
         if point_set.shape[0] == 0:
-            point_set = np.array([[0.0, 0.0, 0.0, 0.0]])
+            point_set = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
         # Resample
         choice = np.random.choice(point_set.shape[0], self.npoints, replace=True)
         point_set = point_set[choice, :]
@@ -400,14 +421,15 @@ class AvodDataset(object):
             NUM_HEADING_BIN)
 
         self.sample_id_counter += 1
-        return Sample(self.sample_id_counter, point_set, seg_mask, box3d_center, angle_class, angle_residual,\
+        return Sample(self.sample_id_counter, point_set_rgb, seg_mask, box3d_center, angle_class, angle_residual,\
             size_class, size_residual, rot_angle, cls_label, proposal, heading_angle, iou)
 
     def visualize_one_sample(self, pc_rect, pc_in_prop_box, gt_box_3d, prop_box_3d):
         import mayavi.mlab as mlab
-        from viz_util import draw_lidar, draw_gt_boxes3d
+        from viz_util import draw_lidar, draw_lidar_simple, draw_gt_boxes3d
         # fig = draw_lidar(pc_rect)
-        fig = draw_lidar(pc_in_prop_box, pts_color=(1,1,1))
+        # fig = draw_lidar(pc_in_prop_box, pts_color=(1,1,1))
+        fig = draw_lidar_simple(pc_in_prop_box[:, :3], pc_in_prop_box[:, 4:])
         # fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
         # fig = draw_gt_boxes3d([prop_box_3d], fig, draw_text=False, color=(1, 1, 1))
         # roi_feature_map
@@ -470,6 +492,7 @@ class AvodDataset(object):
         calib = self.kitti_dataset.get_calibration(data_idx) # 3 by 4 matrix
         objects = self.kitti_dataset.get_label_objects(data_idx)
         proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.1)
+        image = self.kitti_dataset.get_image(data_idx)
         pc_velo = self.kitti_dataset.get_lidar(data_idx)
         pc_rect = np.zeros_like(pc_velo)
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
@@ -502,7 +525,7 @@ class AvodDataset(object):
             # train regression
             if iou_with_gt < 0.3:
                 # non-object
-                sample = self.get_one_sample(prop_, pc_rect, calib, iou_with_gt, None, None)
+                sample = self.get_one_sample(prop_, pc_rect, image, calib, iou_with_gt, None, None)
                 if sample:
                     samples.append(sample)
                     # neg_box.append(prop_corners_3d)
@@ -516,7 +539,7 @@ class AvodDataset(object):
                     prop = copy.deepcopy(prop_)
                     if self.perturb_prop:
                         prop = random_shift_box3d(prop)
-                    sample = self.get_one_sample(prop, pc_rect, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx])
+                    sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx])
                     if sample:
                         pos_idxs.append(len(samples))
                         samples.append(sample)
@@ -539,7 +562,7 @@ class AvodDataset(object):
                     prop = copy.deepcopy(gt_prop)
                     if self.perturb_prop:
                         prop = random_shift_box3d(prop)
-                    sample = self.get_one_sample(prop, pc_rect, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
+                    sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
                     if sample:
                         pos_idxs.append(len(samples))
                         samples.append(sample)
@@ -585,12 +608,12 @@ if __name__ == '__main__':
     if split == 'train':
         augmentX = 1
         perturb_prop = False
-        fill_with_label = True
+        fill_with_label = False
     else:
         augmentX = 1
         perturb_prop = False
-        fill_with_label = True
-    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
+        fill_with_label = False
+    dataset = AvodDataset(1024, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
                  augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()
