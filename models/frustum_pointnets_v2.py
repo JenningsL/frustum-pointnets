@@ -122,8 +122,8 @@ def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec, feature_vec,
 
     # Fully connected layers
     net = tf.reshape(l3_points, [batch_size, -1])
-    #net = tf.concat([net, one_hot_vec, feature_vec], axis=1)
-    net = tf.concat([net, one_hot_vec], axis=1)
+    net = tf.concat([net, one_hot_vec, feature_vec], axis=1)
+    # net = tf.concat([net, one_hot_vec], axis=1)
     net = tf_util.fully_connected(net, 512, bn=True,
         is_training=is_training, scope='fc1', bn_decay=bn_decay)
     #net = tf_util.dropout(net, keep_prob=0.4, is_training=is_training, scope='est_dp1')

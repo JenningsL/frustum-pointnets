@@ -324,7 +324,15 @@ def get_loss(cls_label, ious, mask_label, center_label, \
     cls_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(\
         logits=end_points['cls_logits'], labels=cls_label))
     tf.summary.scalar('classification loss', cls_loss)
-    iou_mask = tf.greater_equal(ious, REG_IOU)
+    car_iou_thres = tf.greater_equal(ious, 0.65)
+    is_car = tf.equal(cls_label, g_type2onehotclass['Car'])
+    car_reg_mask = tf.logical_and(is_car, car_iou_thres)
+    people_iou_thres = tf.greater_equal(ious, 0.55)
+    is_people = tf.logical_or(tf.equal(cls_label, g_type2onehotclass['Pedestrian']), \
+        tf.equal(cls_label, g_type2onehotclass['Cyclist']))
+    people_reg_mask = tf.logical_and(is_people, people_iou_thres)
+    iou_mask = tf.logical_or(car_reg_mask, people_reg_mask)
+
     is_obj_mask = tf.to_float(iou_mask)
     #cls_label_pred = tf.argmax(tf.nn.softmax(end_points['cls_logits']), axis=1)
     #is_obj_mask = tf.to_float(tf.not_equal(cls_label_pred, g_type2onehotclass['NonObject']))

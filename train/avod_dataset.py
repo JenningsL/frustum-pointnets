@@ -506,7 +506,8 @@ class AvodDataset(object):
                 if sample:
                     samples.append(sample)
                     # neg_box.append(prop_corners_3d)
-            elif iou_with_gt >= 0.5:
+            elif iou_with_gt >= 0.5 \
+                or (iou_with_gt >= 0.45 and objects[obj_idx].type in ['Pedestrian', 'Cyclist']):
                 if self.roi_feature_ is None:
                     self.roi_feature_ = prop_.roi_features
                 avg_iou.append(iou_with_gt)
@@ -582,15 +583,15 @@ if __name__ == '__main__':
     kitti_path = sys.argv[1]
     split = sys.argv[2]
     if split == 'train':
-        augmentX = 2
-        perturb_prop = True
+        augmentX = 1
+        perturb_prop = False
         fill_with_label = True
     else:
         augmentX = 1
         perturb_prop = False
         fill_with_label = True
     dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
-                 augmentX=augmentX, random_shift=True, rotate_to_center=True, random_flip=True,
+                 augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()
 
