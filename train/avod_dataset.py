@@ -30,8 +30,9 @@ def random_shift_box3d(obj, shift_ratio=0.1):
     '''
     r = shift_ratio
     # 0.9 to 1.1
-    obj.t[0] = obj.t[0] + obj.l*r*(np.random.random()*2-1)
+    # obj.t[0] = obj.t[0] + obj.l*r*(np.random.random()*2-1)
     obj.t[1] = obj.t[1] + obj.w*r*(np.random.random()*2-1)
+    obj.t[2] = obj.t[2] + obj.l*r*(np.random.random()*2-1)
     obj.w = obj.w*(1+np.random.random()*2*r-r)
     obj.l = obj.l*(1+np.random.random()*2*r-r)
     # obj.h = obj.h*(1+np.random.random()*2*r-r)
@@ -42,6 +43,12 @@ def is_near(prop1, prop2):
     c2 = np.array(prop2.t)
     r = max(prop1.w, prop1.l, prop1.h, prop2.w, prop2.l, prop2.h)
     return np.linalg.norm(c1-c2) < r / 2.0
+
+def get_iou(bev_box1, bev_box2):
+    p1 = Polygon(bev_box1)
+    p2 = Polygon(bev_box2)
+    intersection = p1.intersection(p2).area
+    return intersection / (p1.area + p2.area - intersection)
 
 class Sample(object):
     def __init__(self, idx, point_set, seg, box3d_center, angle_class, angle_residual,\
@@ -155,6 +162,22 @@ class AvodDataset(object):
         print('recall: {}'.format(recall/has_obj_count))
         print('Avg iou: {}'.format(np.mean(avg_iou)))
         print('Avg points: {}, pos_ratio: {}'.format(npoints/pos_count, obj_points/npoints))
+
+    def group_overlaps(self, objs, calib, iou_thres=0.01):
+        bev_boxes = map(lambda obj: utils.compute_box_3d(obj, calib.P)[1][:4, [0,2]], objs)
+        groups = []
+        candidates = range(len(objs))
+        while len(candidates) > 0:
+            idx = candidates[0]
+            group = [idx]
+            for i in candidates[1:]:
+                if get_iou(bev_boxes[idx], bev_boxes[i]) >= iou_thres:
+                    group.append(i)
+            for j in group:
+                candidates.remove(j)
+            groups.append(map(lambda i: objs[i], group))
+            # groups.append(group)
+        return groups
 
     def do_sampling(self, frame_data, pos_ratio=0.5, is_eval=False):
         samples = frame_data['samples']
@@ -513,6 +536,13 @@ class AvodDataset(object):
         pos_box = []
         neg_box = []
         avg_iou = []
+        groups = self.group_overlaps(proposals, calib, 0.7)
+        proposals_reduced = []
+        KEEP_OVERLAP = 1
+        for g in groups:
+            random.shuffle(g)
+            proposals_reduced += g[:KEEP_OVERLAP]
+        proposals = proposals_reduced
         for prop_ in proposals:
             prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
             if prop_corners_image_2d is None:
@@ -542,23 +572,17 @@ class AvodDataset(object):
                 prop_.h = gt_prop.h
                 prop_.l = gt_prop.l
                 prop_.ry = gt_prop.ry
-                prop_ = random_shift_box3d(prop_)
                 #####
                 avg_iou.append(iou_with_gt)
 
-                for _ in range(self.augmentX):
-                    prop = copy.deepcopy(prop_)
-                    if self.perturb_prop:
-                        prop = random_shift_box3d(prop)
-                    sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx])
-                    if sample:
-                        pos_idxs.append(len(samples))
-                        samples.append(sample)
-                        recall[obj_idx] = 1
-                        # pos_box.append(prop_corners_3d)
-                    # only do augmentation for those iou >= REG_IOU
-                    if iou_with_gt < REG_IOU:
-                        break
+                prop = copy.deepcopy(prop_)
+                sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx])
+                if sample:
+                    pos_idxs.append(len(samples))
+                    samples.append(sample)
+                    recall[obj_idx] = 1
+                    _, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+                    pos_box.append(prop_corners_3d)
             else:
                 continue
 
@@ -569,15 +593,17 @@ class AvodDataset(object):
                     continue
                 # FIXME: use roi feature of the first found positive proposal now
                 gt_prop, iou_with_gt = self.get_proposal_from_label(objects[i], calib, self.roi_feature_)
-                for _ in range(self.augmentX):
-                    prop = copy.deepcopy(gt_prop)
-                    if self.perturb_prop:
-                        prop = random_shift_box3d(prop)
-                    sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
-                    if sample:
-                        pos_idxs.append(len(samples))
-                        samples.append(sample)
-                        recall[i] = 1
+
+                prop = copy.deepcopy(gt_prop)
+                # if self.perturb_prop:
+                #     prop = random_shift_box3d(prop)
+                sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
+                if sample:
+                    pos_idxs.append(len(samples))
+                    samples.append(sample)
+                    recall[i] = 1
+                    _, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+                    pos_box.append(prop_corners_3d)
 
         # self.visualize_proposals(pc_rect, pos_box, neg_box, gt_boxes_3d)
         self.load_progress += 1
@@ -624,14 +650,14 @@ if __name__ == '__main__':
         augmentX = 1
         perturb_prop = False
         fill_with_label = True
-    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people_rgb_gt/'+split,
+    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people_gt/'+split,
                  augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()
     '''
     produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly, args=(1.0,))
     produce_thread.start()
-    
+
     while(True):
         batch = dataset.get_next_batch()
         is_last_batch = batch[-1]
@@ -640,6 +666,6 @@ if __name__ == '__main__':
         if is_last_batch:
             break
     dataset.stop_loading()
-    
+
     produce_thread.join()
     '''
