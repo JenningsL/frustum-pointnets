@@ -104,7 +104,10 @@ def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec, feature_vec,
     # Gather object points
     batch_size = object_point_cloud.get_shape()[0].value
 
-    l0_xyz = object_point_cloud
+    #l0_xyz = object_point_cloud
+    #l0_points = None
+    l0_xyz = tf.slice(object_point_cloud, [0,0,0], [-1,-1,3])
+    #l0_points = tf.slice(object_point_cloud, [0,0,3], [-1,-1,-1])
     l0_points = None
     # Set abstraction layers
     l1_xyz, l1_points, l1_indices = pointnet_sa_module(l0_xyz, l0_points,
@@ -122,8 +125,8 @@ def get_3d_box_estimation_v2_net(object_point_cloud, one_hot_vec, feature_vec,
 
     # Fully connected layers
     net = tf.reshape(l3_points, [batch_size, -1])
-    net = tf.concat([net, one_hot_vec, feature_vec], axis=1)
-    # net = tf.concat([net, one_hot_vec], axis=1)
+    #net = tf.concat([net, one_hot_vec, feature_vec], axis=1)
+    net = tf.concat([net, one_hot_vec], axis=1)
     net = tf_util.fully_connected(net, 512, bn=True,
         is_training=is_training, scope='fc1', bn_decay=bn_decay)
     #net = tf_util.dropout(net, keep_prob=0.4, is_training=is_training, scope='est_dp1')
@@ -164,22 +167,24 @@ def get_model(point_cloud, cls_label, feature_vec, is_training, bn_decay=None):
 
     # Masking
     # select masked points and translate to masked points' centroid
-    object_point_cloud_xyz, mask_xyz_mean, end_points = \
-        point_cloud_masking(point_cloud, logits, end_points)
+    object_point_cloud, mask_xyz_mean, end_points = \
+        point_cloud_masking(point_cloud, logits, end_points, xyz_only=False)
+    object_point_cloud_xyz = tf.slice(object_point_cloud, [0,0,0], [-1,-1,3])
 
     # T-Net and coordinate translation
     center_delta, end_points = get_center_regression_net(\
-        object_point_cloud_xyz, end_points['one_hot_gt'],
+        object_point_cloud, end_points['one_hot_gt'],
         is_training, bn_decay, end_points)
     stage1_center = center_delta + mask_xyz_mean # Bx3
     end_points['stage1_center'] = stage1_center
     # Get object point cloud in object coordinate
     object_point_cloud_xyz_new = \
         object_point_cloud_xyz - tf.expand_dims(center_delta, 1)
-
+    object_point_cloud_features = tf.slice(object_point_cloud, [0,0,3], [-1,-1,-1])
+    object_point_cloud_new = tf.concat([object_point_cloud_xyz_new, object_point_cloud_features], axis=-1)
     # Amodel Box Estimation PointNet
     output, end_points = get_3d_box_estimation_v2_net(\
-        object_point_cloud_xyz_new, end_points['one_hot_gt'], feature_vec,
+        object_point_cloud_new, end_points['one_hot_gt'], feature_vec,
         is_training, bn_decay, end_points)
 
     # Parse output to 3D box parameters

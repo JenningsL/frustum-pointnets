@@ -162,9 +162,11 @@ class AvodDataset(object):
         neg_idxs = [i for i in range(0, len(samples)) if i not in pos_idxs]
         random.shuffle(neg_idxs)
         if is_eval:
-            # need_neg = int(len(neg_idxs) * 0.5)
-            need_neg = len(neg_idxs)
+            #need_neg = int(len(neg_idxs) * 0.5)
+            #need_neg = len(neg_idxs)
+            need_neg = 1
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
+            #keep_idxs = pos_idxs
         elif pos_ratio == 0.0:
             keep_idxs = neg_idxs
         elif pos_ratio == 1.0:
@@ -173,19 +175,22 @@ class AvodDataset(object):
             cyclist_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Cyclist']]
             pedestrian_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Pedestrian']]
             car_idxs = [i for i in pos_idxs if samples[i].cls_label == g_type2onehotclass['Car']]
+            '''
             # downsample
             car_idxs = random.sample(car_idxs, int(len(car_idxs) * 0.5))
             # oversample
             cyclist_idxs = cyclist_idxs * 10
             pedestrian_idxs = pedestrian_idxs * 5
             pos_idxs = car_idxs + cyclist_idxs + pedestrian_idxs
+            '''
             need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio)) + 10
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
+            #keep_idxs = pos_idxs
         random.shuffle(keep_idxs)
         p = 0
         n = 0
         for i in keep_idxs:
-            if samples[i].cls_label == 0:
+            if samples[i].cls_label != g_type2onehotclass['NonObject']:
                 p += 1
             else:
                 n += 1
@@ -251,7 +256,15 @@ class AvodDataset(object):
         batch_proposal_score = np.zeros((bsize,), dtype=np.float32)
         for i in range(bsize):
             sample = samples[i]
-            point_set = copy.deepcopy(sample.point_set[:,0:self.num_channel])
+            assert(sample.point_set.shape[0] == sample.seg_label.shape[0])
+            if sample.point_set.shape[0] == 0:
+                point_set = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
+                seg_label = np.array([0])
+            else:
+                # Resample
+                choice = np.random.choice(sample.point_set.shape[0], self.npoints, replace=True)
+                point_set = sample.point_set[choice, 0:self.num_channel]
+                seg_label = sample.seg_label[choice]
             box3d_center = copy.deepcopy(sample.box3d_center)
             # Data Augmentation
             if self.random_shift:
@@ -263,7 +276,7 @@ class AvodDataset(object):
             batch_center[i,:] = box3d_center
             batch_cls_label[i] = sample.cls_label
             batch_ious[i] = sample.iou
-            batch_label[i,:] = sample.seg_label
+            batch_label[i,:] = seg_label
             batch_heading_class[i] = sample.angle_class
             batch_heading_residual[i] = sample.angle_residual
             batch_size_class[i] = sample.size_class
@@ -317,7 +330,7 @@ class AvodDataset(object):
 
         pc_in_prop_box = pc_rect[prop_inds,:]
         # shuffle points order
-        np.random.shuffle(pc_in_prop_box)
+        #np.random.shuffle(pc_in_prop_box)
         # segmentation label
         seg_mask = np.zeros((pc_in_prop_box.shape[0]))
 
@@ -387,22 +400,12 @@ class AvodDataset(object):
         #         img_show[int(y)][int(x)] = point_set[i, 4:]
         #     cv2.imshow('image',img_show)
         #     cv2.waitKey(0)
-        # empty point set
-        if point_set.shape[0] == 0:
-            point_set = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
-        # Resample
-        choice = np.random.choice(point_set.shape[0], self.npoints, replace=True)
-        point_set = point_set[choice, :]
 
         # ------------------------------ LABELS ----------------------------
         # classification
         # assert(obj_type in ['Car', 'Pedestrian', 'Cyclist', 'NonObject'])
         assert(obj_type in type_whitelist)
         cls_label = g_type2onehotclass[obj_type]
-
-        if seg_mask.shape[0] == 0:
-            seg_mask = np.array([0])
-        seg_mask = seg_mask[choice]
 
         # Get center point of 3D box
         if self.rotate_to_center:
@@ -421,7 +424,7 @@ class AvodDataset(object):
             NUM_HEADING_BIN)
 
         self.sample_id_counter += 1
-        return Sample(self.sample_id_counter, point_set_rgb, seg_mask, box3d_center, angle_class, angle_residual,\
+        return Sample(self.sample_id_counter, point_set, seg_mask, box3d_center, angle_class, angle_residual,\
             size_class, size_residual, rot_angle, cls_label, proposal, heading_angle, iou)
 
     def visualize_one_sample(self, pc_rect, pc_in_prop_box, gt_box_3d, prop_box_3d):
@@ -468,8 +471,7 @@ class AvodDataset(object):
         intersection = prop_poly.intersection(gt_poly)
         iou = intersection.area / (prop_poly.area + gt_poly.area - intersection.area)
         # this iou maybe lower, force to use this for regression
-        if iou < REG_IOU:
-            iou = REG_IOU
+        iou = 0.66
         return prop_obj, iou
 
     def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes, gt_boxes):
@@ -533,6 +535,15 @@ class AvodDataset(object):
                 or (iou_with_gt >= 0.45 and objects[obj_idx].type in ['Pedestrian', 'Cyclist']):
                 if self.roi_feature_ is None:
                     self.roi_feature_ = prop_.roi_features
+                # adjust proposal box with ground truth
+                gt_prop, iou_with_gt = self.get_proposal_from_label(objects[obj_idx], calib, prop_.roi_features)
+                prop_.t = gt_prop.t
+                prop_.w = gt_prop.w
+                prop_.h = gt_prop.h
+                prop_.l = gt_prop.l
+                prop_.ry = gt_prop.ry
+                prop_ = random_shift_box3d(prop_)
+                #####
                 avg_iou.append(iou_with_gt)
 
                 for _ in range(self.augmentX):
@@ -608,25 +619,27 @@ if __name__ == '__main__':
     if split == 'train':
         augmentX = 1
         perturb_prop = False
-        fill_with_label = False
+        fill_with_label = True
     else:
         augmentX = 1
         perturb_prop = False
-        fill_with_label = False
-    dataset = AvodDataset(1024, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
+        fill_with_label = True
+    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people_rgb_gt/'+split,
                  augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()
-
-    # produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly, args=(1.0,))
-    # produce_thread.start()
-    #
-    # while(True):
-    #     batch = dataset.get_next_batch()
-    #     is_last_batch = batch[-1]
-    #     print(batch[-2])
-    #     if is_last_batch:
-    #         break
-    # dataset.stop_loading()
-    #
-    # produce_thread.join()
+    '''
+    produce_thread = threading.Thread(target=dataset.load_buffer_repeatedly, args=(1.0,))
+    produce_thread.start()
+    
+    while(True):
+        batch = dataset.get_next_batch()
+        is_last_batch = batch[-1]
+        print(batch[0][0][0])
+        break
+        if is_last_batch:
+            break
+    dataset.stop_loading()
+    
+    produce_thread.join()
+    '''

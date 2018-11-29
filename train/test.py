@@ -50,11 +50,9 @@ GPU_INDEX = FLAGS.gpu
 NUM_POINT = FLAGS.num_point
 MODEL = importlib.import_module(FLAGS.model)
 # NUM_CLASSES = 2
-NUM_CHANNEL = 4
 
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             #save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people_no_filling/val',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/val',
+             save_dir='/data/ssd/public/jlliu/experiment/frustum-pointnets/train/avod_dataset_car_people_gt/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 
 kitti_dataset = kitti_object('/data/ssd/public/jlliu/Kitti/object')
@@ -251,10 +249,10 @@ def group_overlaps(detections, calib, iou_thres=0.01):
 
 def nms_on_bev(objects, iou_threshold=0.1):
     final_result = {}
-    for frame_id, obj_list in objects.items():
+    for frame_id, detections in objects.items():
         final_result[frame_id] = []
         calib = get_calibration(int(frame_id))
-        detections = filter(lambda d: d.score > np.log(0.5**4) and d.probs[2] >= 0.3, detections)
+        #detections = filter(lambda d: d.score > np.log(0.5**4) and d.probs[2] >= 0.3, detections)
         groups = group_overlaps(detections, calib, iou_threshold)
         for group in groups:
             # highest score

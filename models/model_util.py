@@ -194,7 +194,7 @@ def placeholder_inputs(batch_size, num_point):
         TF placeholders for inputs and ground truths
     '''
     pointclouds_pl = tf.placeholder(tf.float32,
-        shape=(batch_size, num_point, 4))
+        shape=(batch_size, num_point, NUM_CHANNEL))
     features_pl = tf.placeholder(tf.float32, shape=(batch_size, 3136)) # TODO: don't hardcode feature_vector size
     cls_label_pl = tf.placeholder(tf.int32, shape=(batch_size,))
     ious_pl = tf.placeholder(tf.float32, shape=(batch_size,))
