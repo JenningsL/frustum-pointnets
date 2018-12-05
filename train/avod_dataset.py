@@ -30,12 +30,10 @@ def random_shift_box3d(obj, shift_ratio=0.1):
     '''
     r = shift_ratio
     # 0.9 to 1.1
-    # obj.t[0] = obj.t[0] + obj.l*r*(np.random.random()*2-1)
-    obj.t[1] = obj.t[1] + obj.w*r*(np.random.random()*2-1)
-    obj.t[2] = obj.t[2] + obj.l*r*(np.random.random()*2-1)
+    obj.t[0] = obj.t[0] + min(obj.w, obj.l)*r*(np.random.random()*2-1)
+    obj.t[2] = obj.t[2] + min(obj.w, obj.l)*r*(np.random.random()*2-1)
     obj.w = obj.w*(1+np.random.random()*2*r-r)
     obj.l = obj.l*(1+np.random.random()*2*r-r)
-    # obj.h = obj.h*(1+np.random.random()*2*r-r)
     return obj
 
 def is_near(prop1, prop2):
@@ -65,8 +63,9 @@ class Sample(object):
         self.rot_angle = rot_angle
         self.cls_label = cls_label
         self.feature_vec = proposal.roi_features
-        # corresponding proposal
-        self.proposal = proposal
+        # corresponding proposal without roi features
+        prop_box = [proposal.t[0], proposal.t[1], proposal.t[2], proposal.l, proposal.w, proposal.h, proposal.ry]
+        self.proposal = ProposalObject(prop_box, proposal.score, proposal.type)
         self.iou = iou
 
     def random_flip(self):
@@ -119,10 +118,10 @@ class AvodDataset(object):
         self.stop = False # stop loading thread
         self.last_sample_id = None
 
-        self.sample_buffer = Queue(maxsize=2048)
+        self.sample_buffer = Queue(maxsize=1024)
 
         # roi_features of the first positive proposal, for generating proposal from label
-        self.roi_feature_ = None
+        self.roi_feature_ = {}
 
     def load_split_ids(self, split):
         with open(os.path.join(self.kitti_path, split + '.txt')) as f:
@@ -188,8 +187,8 @@ class AvodDataset(object):
             #need_neg = int(len(neg_idxs) * 0.5)
             #need_neg = len(neg_idxs)
             need_neg = 1
-            keep_idxs = pos_idxs + neg_idxs[:need_neg]
-            #keep_idxs = pos_idxs
+            #keep_idxs = pos_idxs + neg_idxs[:need_neg]
+            keep_idxs = pos_idxs
         elif pos_ratio == 0.0:
             keep_idxs = neg_idxs
         elif pos_ratio == 1.0:
@@ -206,7 +205,7 @@ class AvodDataset(object):
             pedestrian_idxs = pedestrian_idxs * 5
             pos_idxs = car_idxs + cyclist_idxs + pedestrian_idxs
             '''
-            need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio)) + 10
+            need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio))
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
             #keep_idxs = pos_idxs
         random.shuffle(keep_idxs)
@@ -538,7 +537,7 @@ class AvodDataset(object):
         avg_iou = []
         groups = self.group_overlaps(proposals, calib, 0.7)
         proposals_reduced = []
-        KEEP_OVERLAP = 1
+        KEEP_OVERLAP = 5
         for g in groups:
             random.shuffle(g)
             proposals_reduced += g[:KEEP_OVERLAP]
@@ -563,47 +562,55 @@ class AvodDataset(object):
                     # neg_box.append(prop_corners_3d)
             elif iou_with_gt >= 0.5 \
                 or (iou_with_gt >= 0.45 and objects[obj_idx].type in ['Pedestrian', 'Cyclist']):
-                if self.roi_feature_ is None:
-                    self.roi_feature_ = prop_.roi_features
+                obj_type = objects[obj_idx].type
+                if self.roi_feature_.get(obj_type) is None:
+                    self.roi_feature_[obj_type] = prop_.roi_features
                 # adjust proposal box with ground truth
+                '''
                 gt_prop, iou_with_gt = self.get_proposal_from_label(objects[obj_idx], calib, prop_.roi_features)
                 prop_.t = gt_prop.t
                 prop_.w = gt_prop.w
                 prop_.h = gt_prop.h
                 prop_.l = gt_prop.l
                 prop_.ry = gt_prop.ry
+                '''
                 #####
                 avg_iou.append(iou_with_gt)
 
-                prop = copy.deepcopy(prop_)
+                #prop = copy.deepcopy(prop_)
+                prop = prop_
                 sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx])
                 if sample:
                     pos_idxs.append(len(samples))
                     samples.append(sample)
                     recall[obj_idx] = 1
-                    _, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
-                    pos_box.append(prop_corners_3d)
+                    #_, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+                    #pos_box.append(prop_corners_3d)
             else:
                 continue
 
         # use groundtruth to generate proposal
-        if self.fill_with_label and self.roi_feature_ is not None:
+        if self.fill_with_label:
             for i in range(len(objects)):
                 if recall[i]:
                     continue
                 # FIXME: use roi feature of the first found positive proposal now
-                gt_prop, iou_with_gt = self.get_proposal_from_label(objects[i], calib, self.roi_feature_)
+                fake_roi_feature = self.roi_feature_.get(objects[i].type)
+                if fake_roi_feature is None:
+                    continue
+                gt_prop, iou_with_gt = self.get_proposal_from_label(objects[i], calib, fake_roi_feature)
 
-                prop = copy.deepcopy(gt_prop)
+                #prop = copy.deepcopy(gt_prop)
+                prop = gt_prop
                 # if self.perturb_prop:
-                #     prop = random_shift_box3d(prop)
+                prop = random_shift_box3d(prop)
                 sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
                 if sample:
                     pos_idxs.append(len(samples))
                     samples.append(sample)
                     recall[i] = 1
-                    _, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
-                    pos_box.append(prop_corners_3d)
+                    #_, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+                    #pos_box.append(prop_corners_3d)
 
         # self.visualize_proposals(pc_rect, pos_box, neg_box, gt_boxes_3d)
         self.load_progress += 1
@@ -649,8 +656,8 @@ if __name__ == '__main__':
     else:
         augmentX = 1
         perturb_prop = False
-        fill_with_label = True
-    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people_gt/'+split,
+        fill_with_label = False
+    dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
                  augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()

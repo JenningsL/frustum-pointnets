@@ -52,7 +52,7 @@ MODEL = importlib.import_module(FLAGS.model)
 # NUM_CLASSES = 2
 
 TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             save_dir='/data/ssd/public/jlliu/experiment/frustum-pointnets/train/avod_dataset_car_people_gt/val',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 
 kitti_dataset = kitti_object('/data/ssd/public/jlliu/Kitti/object')
