@@ -537,7 +537,7 @@ class AvodDataset(object):
         avg_iou = []
         groups = self.group_overlaps(proposals, calib, 0.7)
         proposals_reduced = []
-        KEEP_OVERLAP = 5
+        KEEP_OVERLAP = self.augmentX
         for g in groups:
             random.shuffle(g)
             proposals_reduced += g[:KEEP_OVERLAP]
@@ -650,13 +650,13 @@ if __name__ == '__main__':
     kitti_path = sys.argv[1]
     split = sys.argv[2]
     if split == 'train':
-        augmentX = 1
+        augmentX = 5
         perturb_prop = False
         fill_with_label = True
     else:
         augmentX = 1
         perturb_prop = False
-        fill_with_label = False
+        fill_with_label = True
     dataset = AvodDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
                  augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
