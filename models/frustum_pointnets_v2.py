@@ -13,7 +13,7 @@ sys.path.append(os.path.join(ROOT_DIR, 'utils'))
 import tf_util
 from pointnet_util import pointnet_sa_module, pointnet_sa_module_msg, pointnet_fp_module
 from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER, NUM_OBJECT_POINT
-from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES
+from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES, NUM_CHANNEL
 from model_util import point_cloud_masking, get_center_regression_net
 from model_util import placeholder_inputs, parse_output_to_tensors, get_loss
 
@@ -34,7 +34,7 @@ def get_instance_seg_v2_net(point_cloud, feature_vec, cls_label,
         end_points: dict
     '''
     l0_xyz = tf.slice(point_cloud, [0,0,0], [-1,-1,3])
-    l0_points = tf.slice(point_cloud, [0,0,3], [-1,-1,1])
+    l0_points = tf.slice(point_cloud, [0,0,3], [-1,-1,NUM_CHANNEL-3])
 
     # Set abstraction layers
     l1_xyz, l1_points = pointnet_sa_module_msg(l0_xyz, l0_points,
