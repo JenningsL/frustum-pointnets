@@ -343,33 +343,22 @@ class AvodDataset(object):
             print('skip proposal behind camera')
             return False
         # get points within proposal box
-        # FIXME: sometimes this raise error
-        try:
-            _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
-        except Exception as e:
-            print('extract_pc_in_box3d fail')
-            return False
-
-        pc_in_prop_box = pc_rect[prop_inds,:]
-        # shuffle points order
-        #np.random.shuffle(pc_in_prop_box)
-        # segmentation label
-        seg_mask = np.zeros((pc_in_prop_box.shape[0]))
+        _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
 
         if gt_object is not None:
             obj_type = gt_object.type
+            # expand points to cover the whole object
+            # TODO: use dbscan instead of ground truth
+            _,gt_inds = extract_pc_in_box3d(pc_rect, gt_box_3d)
+            prop_inds = np.logical_or(prop_inds, gt_inds)
+            pc_in_prop_box = pc_rect[prop_inds,:]
+            seg_mask = np.zeros((pc_in_prop_box.shape[0]))
 
-            # FIXME: sometimes this raise error
-            try:
-                _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
-            except Exception as e:
-                print('extract_pc_in_box3d fail')
-                return False
-
+            _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
             seg_mask[inds] = 1
             # Reject object without points
-            if np.sum(seg_mask)==0:
-                print('Reject object without points')
+            if np.sum(seg_mask)==0 or len(pc_in_prop_box) < 5:
+                print('Reject object with too few point')
                 return False
 
             # Get 3D BOX heading
@@ -377,8 +366,14 @@ class AvodDataset(object):
             # Get 3D BOX size
             box3d_size = np.array([gt_object.l, gt_object.w, gt_object.h])
             # Get frustum angle
-            xmin, ymin = prop_corners_image_2d.min(0)
-            xmax, ymax = prop_corners_image_2d.max(0)
+            image_points = calib.project_rect_to_image(pc_in_prop_box[:,:3])
+            expand_image_points = np.concatenate((prop_corners_image_2d, image_points), axis=0)
+            xmin, ymin = expand_image_points.min(0)
+            xmax, ymax = expand_image_points.max(0)
+            # TODO: frustum angle is important, make use of image
+            # xmin,ymin,xmax,ymax = gt_object.box2d
+            # xmin, ymin = prop_corners_image_2d.min(0)
+            # xmax, ymax = prop_corners_image_2d.max(0)
             box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
             uvdepth = np.zeros((1,3))
             uvdepth[0,0:2] = box2d_center
@@ -387,6 +382,8 @@ class AvodDataset(object):
             frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                 box2d_center_rect[0,0])
         else:
+            pc_in_prop_box = pc_rect[prop_inds,:]
+            seg_mask = np.zeros((pc_in_prop_box.shape[0]))
             obj_type = 'NonObject'
             gt_box_3d = np.zeros((8, 3))
             heading_angle = 0
@@ -475,16 +472,21 @@ class AvodDataset(object):
     def get_proposal_from_label(self, label, calib, roi_features):
         '''construct proposal from label'''
         _, corners_3d = utils.compute_box_3d(label, calib.P)
-        # wrap ground truth with box parallel to axis
         bev_box = corners_3d[:4, [0,2]]
-        xmax = bev_box[:, 0].max(axis=0)
-        ymax = bev_box[:, 1].max(axis=0)
-        xmin = bev_box[:, 0].min(axis=0)
-        ymin = bev_box[:, 1].min(axis=0)
-        l = xmax - xmin
-        w = ymax - ymin
-        h = label.h
-        prop_obj = ProposalObject(list(label.t) + [l, w, h, 0.0], 1, label.type, roi_features)
+        box_l = label.l
+        box_w = label.w
+        box_h = label.h
+        # Rotate to nearest multiple of 90 degrees
+        box_ry = label.ry
+        half_pi = np.pi / 2
+        box_ry = np.abs(np.round(box_ry / half_pi) * half_pi)
+        cos_ry = np.abs(np.cos(box_ry))
+        sin_ry = np.abs(np.sin(box_ry))
+        w = box_l * cos_ry + box_w * sin_ry
+        l = box_w * cos_ry + box_l * sin_ry
+        h = box_h
+
+        prop_obj = ProposalObject(list(label.t) + [l, w, h, box_ry], 1, label.type, roi_features)
         _, corners_prop = utils.compute_box_3d(prop_obj, calib.P)
         bev_box_prop = corners_prop[:4, [0,2]]
 
@@ -492,8 +494,6 @@ class AvodDataset(object):
         gt_poly = Polygon(bev_box)
         intersection = prop_poly.intersection(gt_poly)
         iou = intersection.area / (prop_poly.area + gt_poly.area - intersection.area)
-        # this iou maybe lower, force to use this for regression
-        iou = 0.66
         return prop_obj, iou
 
     def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes, gt_boxes):
@@ -600,17 +600,17 @@ class AvodDataset(object):
                     continue
                 gt_prop, iou_with_gt = self.get_proposal_from_label(objects[i], calib, fake_roi_feature)
 
-                #prop = copy.deepcopy(gt_prop)
-                prop = gt_prop
-                # if self.perturb_prop:
-                prop = random_shift_box3d(prop)
-                sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
-                if sample:
-                    pos_idxs.append(len(samples))
-                    samples.append(sample)
-                    recall[i] = 1
-                    #_, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
-                    #pos_box.append(prop_corners_3d)
+                for _ in range(self.augmentX):
+                    prop = copy.deepcopy(gt_prop)
+                    # if self.perturb_prop:
+                    prop = random_shift_box3d(prop)
+                    sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
+                    if sample:
+                        pos_idxs.append(len(samples))
+                        samples.append(sample)
+                        recall[i] = 1
+                        #_, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+                        #pos_box.append(prop_corners_3d)
 
         # self.visualize_proposals(pc_rect, pos_box, neg_box, gt_boxes_3d)
         self.load_progress += 1

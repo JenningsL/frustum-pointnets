@@ -106,6 +106,7 @@ class kitti_object_avod(kitti_object):
         self.lidar_dir = os.path.join(self.split_dir, 'velodyne')
         self.label_dir = os.path.join(self.split_dir, 'label_2')
         self.proposal_dir = os.path.join(self.split_dir, 'proposal_car_people')
+        self.plane_dir = os.path.join(self.split_dir, 'planes')
 
         # self.num_samples = len(os.listdir(self.image_dir))
         # print(self.num_samples)
@@ -117,6 +118,14 @@ class kitti_object_avod(kitti_object):
                 if i in lines:
                     arr.append(np.fromstring(line, dtype=float, sep=' '))
         return np.array(arr)
+
+    def get_plane(self, idx):
+        assert(idx<self.num_samples)
+        plane_file = os.path.join(self.plane_dir, '%06d.txt'%(idx))
+        with open(plane_file, 'rb') as fin:
+            lines = fin.readlines()
+            vec = lines[-1].split(' ')
+            return map(lambda l: float(l), vec)
 
     def get_proposals(self, idx, rpn_score_threshold=0.1, nms_iou_thres=0.3):
         assert(idx<self.num_samples)
