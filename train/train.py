@@ -19,7 +19,8 @@ ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
 from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES, g_type2onehotclass, NUM_CHANNEL
-from avod_dataset import AvodDataset, Sample
+# from avod_dataset import RPNDataset, Sample
+from rpn_dataset import RPNDataset, Sample
 import provider
 from train_util import get_batch
 
@@ -71,10 +72,10 @@ BN_DECAY_DECAY_STEP = float(DECAY_STEP)
 BN_DECAY_CLIP = 0.99
 
 # load data set in background thread, remember to join data_loading_thread somewhere
-TRAIN_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
+TRAIN_DATASET = RPNDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/train',
              augmentX=1, random_shift=True, rotate_to_center=True, random_flip=True)
-TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
+TEST_DATASET = RPNDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 train_loading_thread = Thread(target=TRAIN_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio, False))
