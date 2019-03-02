@@ -76,8 +76,8 @@ class ProposalObject(object):
         # [x, y, z, l, w, h, ry]
         self.t = box_3d[0:3]
         self.l = box_3d[3]
-        self.w = box_3d[4]
-        self.h = box_3d[5]
+        self.h = box_3d[4]
+        self.w = box_3d[5]
         self.ry = box_3d[6]
         self.score = score
         self.type = type
@@ -105,6 +105,7 @@ class kitti_object_avod(kitti_object):
         self.calib_dir = os.path.join(self.split_dir, 'calib')
         self.lidar_dir = os.path.join(self.split_dir, 'velodyne')
         self.label_dir = os.path.join(self.split_dir, 'label_2')
+        # self.proposal_dir = os.path.join(self.split_dir, 'proposal_car_people_max')
         self.proposal_dir = os.path.join(self.split_dir, 'proposal_car_people')
         self.plane_dir = os.path.join(self.split_dir, 'planes')
 
@@ -153,7 +154,7 @@ class kitti_object_avod(kitti_object):
             # boxes.append(corners_velo)
             boxes.append(corners)
             box_scores.append(obj.score)
-        #bev_boxes = list(map(lambda bs: [np.amin(bs[0],axis=0)[0], np.amin(bs[0], axis=0)[2], np.amax(bs[0], axis=0)[0], np.amax(bs[0], axis=0)[2], bs[1]], zip(boxes, box_scores)))
+        # bev_boxes = list(map(lambda bs: [np.amin(bs[0],axis=0)[0], np.amin(bs[0], axis=0)[2], np.amax(bs[0], axis=0)[0], np.amax(bs[0], axis=0)[2], bs[1]], zip(boxes, box_scores)))
         #bev_boxes = np.array(bev_boxes)
         # print('before nms: {0}'.format(len(bev_boxes)))
         #nms_idxs = non_max_suppression(bev_boxes, nms_iou_thres)

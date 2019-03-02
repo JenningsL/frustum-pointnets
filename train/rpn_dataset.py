@@ -64,7 +64,7 @@ class Sample(object):
         self.cls_label = cls_label
         # self.feature_vec = proposal.roi_features
         # corresponding proposal without roi features
-        prop_box = [proposal.t[0], proposal.t[1], proposal.t[2], proposal.l, proposal.w, proposal.h, proposal.ry]
+        prop_box = [proposal.t[0], proposal.t[1], proposal.t[2], proposal.l, proposal.h, proposal.w, proposal.ry]
         self.proposal = ProposalObject(prop_box, proposal.score, proposal.type)
         self.iou = iou
 
@@ -495,7 +495,7 @@ class RPNDataset(object):
         l = box_w * cos_ry + box_l * sin_ry
         h = box_h
 
-        prop_obj = ProposalObject(list(label.t) + [l, w, h, box_ry], 1, label.type, roi_features)
+        prop_obj = ProposalObject(list(label.t) + [l, h, w, box_ry], 1, label.type, roi_features)
         _, corners_prop = utils.compute_box_3d(prop_obj, calib.P)
         bev_box_prop = corners_prop[:4, [0,2]]
 
@@ -558,7 +558,8 @@ class RPNDataset(object):
         # print(data_idx_str)
         calib = self.kitti_dataset.get_calibration(data_idx) # 3 by 4 matrix
         objects = self.kitti_dataset.get_label_objects(data_idx)
-        proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.1)
+        # proposals = self.kitti_dataset.get_proposals(data_idx, rpn_score_threshold=0.1)
+        proposals = self.get_proposals(data_idx)
         image = self.kitti_dataset.get_image(data_idx)
         pc_velo = self.kitti_dataset.get_lidar(data_idx)
         pc_rect = np.zeros_like(pc_velo)
