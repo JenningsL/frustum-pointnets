@@ -22,7 +22,7 @@ sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
 from model_util import NUM_HEADING_BIN, NUM_SIZE_CLUSTER
 from model_util import NUM_SEG_CLASSES, NUM_OBJ_CLASSES, g_type2onehotclass, type_whitelist
-from avod_dataset import AvodDataset, Sample
+from rpn_dataset import RPNDataset, Sample
 import provider
 from train_util import get_batch
 from kitti_object import *
@@ -51,7 +51,7 @@ NUM_POINT = FLAGS.num_point
 MODEL = importlib.import_module(FLAGS.model)
 # NUM_CLASSES = 2
 
-TEST_DATASET = AvodDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
+TEST_DATASET = RPNDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
              save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 
@@ -368,7 +368,6 @@ def test(output_filename, result_dir=None):
     to_fill_filename_list = [frame_id+'.txt' \
             for frame_id in TEST_DATASET.frame_ids]
     fill_files(output_dir, to_fill_filename_list)
-    sys.exit(0)
     TEST_DATASET.stop_loading()
     val_loading_thread.join()
 

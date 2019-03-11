@@ -239,6 +239,9 @@ class RPNDataset(object):
 
     def stop_loading(self):
         self.stop = True
+        while not self.sample_buffer.empty():
+            item = self.sample_buffer.get()
+            self.sample_buffer.task_done()
 
     def load_buffer_repeatedly(self, pos_ratio=0.5, is_eval=False):
         i = -1
@@ -282,7 +285,8 @@ class RPNDataset(object):
         batch_size_class = np.zeros((bsize,), dtype=np.int32)
         batch_size_residual = np.zeros((bsize, 3))
         batch_rot_angle = np.zeros((bsize,))
-        batch_feature_vec = np.zeros((bsize, samples[0].feature_vec.shape[0]))
+        #batch_feature_vec = np.zeros((bsize, samples[0].feature_vec.shape[0]))
+        batch_feature_vec = np.zeros((bsize, 3136))
         frame_ids = []
         batch_proposal_score = np.zeros((bsize,), dtype=np.float32)
         for i in range(bsize):
@@ -700,7 +704,7 @@ if __name__ == '__main__':
     else:
         augmentX = 1
         perturb_prop = False
-        fill_with_label = True
+        fill_with_label = False
     dataset = RPNDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
                  augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
