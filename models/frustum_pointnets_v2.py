@@ -51,7 +51,8 @@ def get_instance_seg_v2_net(point_cloud, feature_vec, cls_label,
         bn_decay=bn_decay, scope='layer3')
 
     # classification
-    batch_size = tf.shape(feature_vec)[0]
+    batch_size = feature_vec.shape[0]
+    #print('batch size:', batch_size)
     cls_net = tf.reshape(l3_points, [batch_size, -1])
     # cls_net = tf.concat([cls_net, feature_vec], axis=1)
     cls_net = tf_util.fully_connected(cls_net, 512, bn=True, is_training=is_training, scope='cls_fc1', bn_decay=bn_decay)

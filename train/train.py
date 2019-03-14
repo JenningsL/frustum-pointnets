@@ -39,7 +39,7 @@ parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate fo
 parser.add_argument('--no_intensity', action='store_true', help='Only use XYZ for training')
 parser.add_argument('--restore_model_path', default=None, help='Restore model path e.g. log/model.ckpt [default: None]')
 parser.add_argument('--hard_sample_mining', default=False, help='If train only with classification hard samples')
-parser.add_argument('--pos_ratio', type=float, default=1.0, help='Positive proposal ratio')
+parser.add_argument('--pos_ratio', type=float, default=0.5, help='Positive proposal ratio')
 parser.add_argument('--train_cls_only', type=int, default=0, help='Train classification only')
 parser.add_argument('--train_reg_only', type=int, default=0, help='Train box regression only')
 FLAGS = parser.parse_args()
@@ -73,10 +73,10 @@ BN_DECAY_CLIP = 0.99
 
 # load data set in background thread, remember to join data_loading_thread somewhere
 TRAIN_DATASET = RPNDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'train',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/train',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/rpn_dataset_car_people/train',
              augmentX=1, random_shift=True, rotate_to_center=True, random_flip=True)
 TEST_DATASET = RPNDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/val',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/rpn_dataset_car_people/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 train_loading_thread = Thread(target=TRAIN_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio, False))
 val_loading_thread = Thread(target=TEST_DATASET.load_buffer_repeatedly, args=(FLAGS.pos_ratio, True))

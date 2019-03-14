@@ -52,7 +52,7 @@ MODEL = importlib.import_module(FLAGS.model)
 # NUM_CLASSES = 2
 
 TEST_DATASET = RPNDataset(NUM_POINT, '/data/ssd/public/jlliu/Kitti/object', BATCH_SIZE, 'val',
-             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/avod_dataset_car_people/val',
+             save_dir='/data/ssd/public/jlliu/frustum-pointnets/train/rpn_dataset_car_people/val',
              augmentX=1, random_shift=False, rotate_to_center=True, random_flip=False)
 
 kitti_dataset = kitti_object('/data/ssd/public/jlliu/Kitti/object')
@@ -170,7 +170,8 @@ def to_detection_objects(id_list, type_list, center_list, \
         if type_list[i] == 'NonObject':
             continue
         idx = id_list[i]
-        score = score_list[i] + np.log(proposal_score_list[i])
+        #score = score_list[i] + np.log(proposal_score_list[i])
+        score = score_list[i]
         h,w,l,tx,ty,tz,ry = provider.from_prediction_to_label_format(center_list[i],
             heading_cls_list[i], heading_res_list[i],
             size_cls_list[i], size_res_list[i], rot_angle_list[i])

@@ -193,11 +193,11 @@ class RPNDataset(object):
         neg_idxs = [i for i in range(0, len(samples)) if i not in pos_idxs]
         random.shuffle(neg_idxs)
         if is_eval:
-            #need_neg = int(len(neg_idxs) * 0.5)
+            need_neg = int(len(neg_idxs) * 0.5)
             #need_neg = len(neg_idxs)
-            need_neg = 1
-            #keep_idxs = pos_idxs + neg_idxs[:need_neg]
-            keep_idxs = pos_idxs
+            #need_neg = 1
+            keep_idxs = pos_idxs + neg_idxs[:need_neg]
+            #keep_idxs = pos_idxs
         elif pos_ratio == 0.0:
             keep_idxs = neg_idxs
         elif pos_ratio == 1.0:
@@ -351,6 +351,9 @@ class RPNDataset(object):
 
     def get_one_sample(self, proposal, pc_rect, image, calib, iou, gt_box_3d, gt_object):
         '''convert to frustum sample format'''
+        # expand points to cover the whole object
+        #proposal.l += 0.5
+        #proposal.w += 0.5
         prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(proposal, calib.P)
         if prop_corners_image_2d is None:
             print('skip proposal behind camera')
@@ -360,10 +363,9 @@ class RPNDataset(object):
 
         if gt_object is not None:
             obj_type = gt_object.type
-            # expand points to cover the whole object
             # TODO: use dbscan instead of ground truth
-            _,gt_inds = extract_pc_in_box3d(pc_rect, gt_box_3d)
-            prop_inds = np.logical_or(prop_inds, gt_inds)
+            #_,gt_inds = extract_pc_in_box3d(pc_rect, gt_box_3d)
+            #prop_inds = np.logical_or(prop_inds, gt_inds)
             pc_in_prop_box = pc_rect[prop_inds,:]
             seg_mask = np.zeros((pc_in_prop_box.shape[0]))
 
@@ -591,6 +593,7 @@ class RPNDataset(object):
             proposals_reduced += g[:KEEP_OVERLAP]
         proposals = proposals_reduced
         for prop_ in proposals:
+            prop = copy.deepcopy(prop_)
             prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop_, calib.P)
             if prop_corners_image_2d is None:
                 # print('skip proposal behind camera')
@@ -604,7 +607,7 @@ class RPNDataset(object):
             # train regression
             if iou_with_gt < 0.3:
                 # non-object
-                sample = self.get_one_sample(prop_, pc_rect, image, calib, iou_with_gt, None, None)
+                sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, None, None)
                 if sample:
                     samples.append(sample)
                     # neg_box.append(prop_corners_3d)
@@ -625,8 +628,6 @@ class RPNDataset(object):
                 #####
                 avg_iou.append(iou_with_gt)
 
-                #prop = copy.deepcopy(prop_)
-                prop = prop_
                 sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx])
                 if sample:
                     pos_idxs.append(len(samples))
@@ -705,7 +706,7 @@ if __name__ == '__main__':
         augmentX = 1
         perturb_prop = False
         fill_with_label = False
-    dataset = RPNDataset(512, kitti_path, 16, split, save_dir='./avod_dataset_car_people/'+split,
+    dataset = RPNDataset(512, kitti_path, 16, split, save_dir='./rpn_dataset_car_people/'+split,
                  augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()
