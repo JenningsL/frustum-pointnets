@@ -23,6 +23,7 @@ from model_util import type_whitelist
 from provider import *
 from shapely.geometry import Polygon, MultiPolygon
 from Queue import Queue
+from sklearn.neighbors import KDTree
 
 def random_shift_box3d(obj, shift_ratio=0.1):
     '''
@@ -349,30 +350,64 @@ class RPNDataset(object):
         box3d_center = (box3d[0,:] + box3d[6,:])/2.0
         return box3d_center
 
-    def get_one_sample(self, proposal, pc_rect, image, calib, iou, gt_box_3d, gt_object):
+    def expand_points(self, pc_rect, proposal, calib, seed_ind, data_idx_str):
+        prop = copy.deepcopy(proposal)
+        prop.l += 1
+        prop.w += 1
+        prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
+        _, local_ind = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+        local_points = pc_rect[local_ind]
+        local_seg = self.pc_seg[data_idx_str][local_ind]
+        fg_ind = local_seg == 1
+        keypoints = pc_rect[seed_ind]
+        # print(np.sum(seed_ind))
+        # print(np.sum(local_ind))
+        # print(np.sum(fg_ind))
+        print('before: ', keypoints.shape[0])
+
+        candidates_ind = np.logical_and(np.logical_not(seed_ind), local_ind)
+        candidates_ind = np.logical_and(candidates_ind, self.pc_seg[data_idx_str] == 1)
+
+        candidates_points = pc_rect[candidates_ind]
+        print('candidates size: ', candidates_points.shape[0])
+        while True:
+            tree = KDTree(keypoints[:,:3], leaf_size=2)
+            new_kp = []
+            selected = np.zeros((len(candidates_points),))
+            for i in range(len(candidates_points)):
+                if tree.query_radius(np.expand_dims(candidates_points[i, :3], axis=0), r=0.3, count_only=True) >= 3:
+                    new_kp.append(candidates_points[i])
+                selected[i] = 1
+            if len(new_kp) == 0:
+                break
+            keypoints = np.concatenate((keypoints, new_kp), axis=0)
+            candidates_points = candidates_points[selected==0]
+        print('after: ', keypoints.shape[0])
+        return keypoints
+
+
+    def get_one_sample(self, proposal, pc_rect, image, calib, iou, gt_box_3d, gt_object, data_idx_str):
         '''convert to frustum sample format'''
-        # expand points to cover the whole object
-        #proposal.l += 0.5
-        #proposal.w += 0.5
         prop_corners_image_2d, prop_corners_3d = utils.compute_box_3d(proposal, calib.P)
         if prop_corners_image_2d is None:
             print('skip proposal behind camera')
             return False
         # get points within proposal box
         _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+        pc_in_prop_box = pc_rect[prop_inds, :]
+        if len(pc_in_prop_box) < 5:
+            print('Reject object with too few point')
+            return False
+        expanded_points = self.expand_points(pc_rect, proposal, calib, prop_inds, data_idx_str)
 
         if gt_object is not None:
             obj_type = gt_object.type
-            # TODO: use dbscan instead of ground truth
-            #_,gt_inds = extract_pc_in_box3d(pc_rect, gt_box_3d)
-            #prop_inds = np.logical_or(prop_inds, gt_inds)
-            pc_in_prop_box = pc_rect[prop_inds,:]
-            seg_mask = np.zeros((pc_in_prop_box.shape[0]))
+            seg_mask = np.zeros((expanded_points.shape[0]))
 
-            _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
+            _,inds = extract_pc_in_box3d(expanded_points, gt_box_3d)
             seg_mask[inds] = 1
             # Reject object without points
-            if np.sum(seg_mask)==0 or len(pc_in_prop_box) < 5:
+            if np.sum(seg_mask)==0 or len(expanded_points) < 5:
                 print('Reject object with too few point')
                 return False
 
@@ -381,7 +416,7 @@ class RPNDataset(object):
             # Get 3D BOX size
             box3d_size = np.array([gt_object.l, gt_object.w, gt_object.h])
             # Get frustum angle
-            image_points = calib.project_rect_to_image(pc_in_prop_box[:,:3])
+            image_points = calib.project_rect_to_image(expanded_points[:,:3])
             expand_image_points = np.concatenate((prop_corners_image_2d, image_points), axis=0)
             xmin, ymin = expand_image_points.min(0)
             xmax, ymax = expand_image_points.max(0)
@@ -396,28 +431,36 @@ class RPNDataset(object):
             box2d_center_rect = calib.project_image_to_rect(uvdepth)
             frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
                 box2d_center_rect[0,0])
+            # show the expand_points
+            # if expanded_points.shape[0] > pc_in_prop_box.shape[0]:
+            #     box2d_center_rect = [[0,0,0]]
+            #     self.visualize_one_sample(pc_in_prop_box, expanded_points, gt_box_3d, prop_corners_3d, box2d_center_rect)
         else:
-            pc_in_prop_box = pc_rect[prop_inds,:]
-            seg_mask = np.zeros((pc_in_prop_box.shape[0]))
+            # pc_in_prop_box = pc_rect[prop_inds,:]
+            seg_mask = np.zeros((expanded_points.shape[0]))
             obj_type = 'NonObject'
             gt_box_3d = np.zeros((8, 3))
             heading_angle = 0
             box3d_size = np.zeros((1, 3))
             frustum_angle = 0
 
+        # show the expand_points
+        # if expanded_points.shape[0] > pc_in_prop_box.shape[0] and obj_type == 'NonObject':
+        #     box2d_center_rect = [[0,0,0]]
+        #     self.visualize_one_sample(pc_in_prop_box, expanded_points, gt_box_3d, prop_corners_3d, box2d_center_rect)
         #############
         rot_angle = self.get_center_view_rot_angle(frustum_angle)
 
         ### RGB
-        point_set_rgb = np.zeros((pc_in_prop_box.shape[0], pc_in_prop_box.shape[1]+3))
-        image_points = calib.project_rect_to_image(pc_in_prop_box[:,:3])
+        point_set_rgb = np.zeros((expanded_points.shape[0], expanded_points.shape[1]+3))
+        image_points = calib.project_rect_to_image(expanded_points[:,:3])
         for i, pt in enumerate(image_points):
             x, y = pt
             if x < 0 or x >= image.shape[1] or y < 0 or y >= image.shape[0]:
                 rgb = np.array([0.0,0.0,0.0])
             else:
                 rgb = image[int(y)][int(x)].astype(np.float32) / 255
-            point_set_rgb[i] = np.concatenate((pc_in_prop_box[i], rgb), axis=0)
+            point_set_rgb[i] = np.concatenate((expanded_points[i], rgb), axis=0)
         # Get point cloud
         if self.rotate_to_center:
             point_set = self.get_center_view_point_set(point_set_rgb, rot_angle)
@@ -461,14 +504,14 @@ class RPNDataset(object):
         return Sample(self.sample_id_counter, point_set, seg_mask, box3d_center, angle_class, angle_residual,\
             size_class, size_residual, rot_angle, cls_label, proposal, heading_angle, iou)
 
-    def visualize_one_sample(self, pc_rect, pc_in_prop_box, gt_box_3d, prop_box_3d):
+    def visualize_one_sample(self, old_points, expand_points, gt_box_3d, prop_box_3d, box2d_center_rect):
         import mayavi.mlab as mlab
         from viz_util import draw_lidar, draw_lidar_simple, draw_gt_boxes3d
-        # fig = draw_lidar(pc_rect)
         # fig = draw_lidar(pc_in_prop_box, pts_color=(1,1,1))
-        fig = draw_lidar_simple(pc_in_prop_box[:, :3], pc_in_prop_box[:, 4:])
-        # fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
-        # fig = draw_gt_boxes3d([prop_box_3d], fig, draw_text=False, color=(1, 1, 1))
+        fig = draw_lidar(expand_points[:, :3], pts_color=(1,1,1))
+        fig = draw_lidar(old_points[:, :3], pts_color=(0,1,0), fig=fig)
+        fig = draw_gt_boxes3d([gt_box_3d], fig, color=(1, 0, 0))
+        fig = draw_gt_boxes3d([prop_box_3d], fig, draw_text=False, color=(1, 1, 1))
         # roi_feature_map
         # roi_features_size = 7 * 7 * 32
         # img_roi_features = prop.roi_features[0:roi_features_size].reshape((7, 7, -1))
@@ -481,7 +524,7 @@ class RPNDataset(object):
         #     fgcolor=None, engine=None, size=(500, 500))
         # mlab.imshow(img_roi_features, colormap='gist_earth', name='img_roi_features', figure=fig1)
         # mlab.imshow(bev_roi_features, colormap='gist_earth', name='bev_roi_features', figure=fig2)
-        # mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
+        mlab.plot3d([0, box2d_center_rect[0][0]], [0, box2d_center_rect[0][1]], [0, box2d_center_rect[0][2]], color=(1,1,1), tube_radius=None, figure=fig)
         raw_input()
 
     def get_proposal_from_label(self, label, calib, roi_features):
@@ -511,10 +554,11 @@ class RPNDataset(object):
         iou = intersection.area / (prop_poly.area + gt_poly.area - intersection.area)
         return prop_obj, iou
 
-    def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes, gt_boxes):
+    def visualize_proposals(self, pc_rect, prop_boxes, neg_boxes, gt_boxes, pc_seg):
         import mayavi.mlab as mlab
         from viz_util import draw_lidar, draw_gt_boxes3d
         fig = draw_lidar(pc_rect)
+        fig = draw_lidar(pc_rect[pc_seg==1], fig=fig, pts_color=(1, 1, 1))
         fig = draw_gt_boxes3d(prop_boxes, fig, draw_text=False, color=(1, 0, 0))
         fig = draw_gt_boxes3d(neg_boxes, fig, draw_text=False, color=(0, 1, 0))
         fig = draw_gt_boxes3d(gt_boxes, fig, draw_text=False, color=(1, 1, 1))
@@ -568,6 +612,15 @@ class RPNDataset(object):
         proposals = self.get_proposals(data_idx)
         image = self.kitti_dataset.get_image(data_idx)
         pc_velo = self.kitti_dataset.get_lidar(data_idx)
+        img_height, img_width = image.shape[0:2]
+        _, pc_image_coord, img_fov_inds = get_lidar_in_image_fov(pc_velo[:,0:3],
+            calib, 0, 0, img_width, img_height, True)
+        pc_velo = pc_velo[img_fov_inds, :]
+        # Same point sampling as RPN
+        choice = self.pc_choices[data_idx_str]
+        # print('choice', len(choice))
+        pc_velo = pc_velo[choice, :]
+
         pc_rect = np.zeros_like(pc_velo)
         pc_rect[:,0:3] = calib.project_velo_to_rect(pc_velo[:,0:3])
         pc_rect[:,3] = pc_velo[:,3]
@@ -607,10 +660,10 @@ class RPNDataset(object):
             # train regression
             if iou_with_gt < 0.3:
                 # non-object
-                sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, None, None)
+                sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, None, None, data_idx_str)
                 if sample:
                     samples.append(sample)
-                    # neg_box.append(prop_corners_3d)
+                    neg_box.append(prop_corners_3d)
             elif iou_with_gt >= 0.5 \
                 or (iou_with_gt >= 0.45 and objects[obj_idx].type in ['Pedestrian', 'Cyclist']):
                 obj_type = objects[obj_idx].type
@@ -628,13 +681,13 @@ class RPNDataset(object):
                 #####
                 avg_iou.append(iou_with_gt)
 
-                sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx])
+                sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[obj_idx], objects[obj_idx], data_idx_str)
                 if sample:
                     pos_idxs.append(len(samples))
                     samples.append(sample)
                     recall[obj_idx] = 1
                     #_, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
-                    #pos_box.append(prop_corners_3d)
+                    pos_box.append(prop_corners_3d)
             else:
                 continue
 
@@ -653,15 +706,15 @@ class RPNDataset(object):
                     prop = copy.deepcopy(gt_prop)
                     # if self.perturb_prop:
                     prop = random_shift_box3d(prop)
-                    sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[i], objects[i])
+                    sample = self.get_one_sample(prop, pc_rect, image, calib, iou_with_gt, gt_boxes_3d[i], objects[i], data_idx_str)
                     if sample:
                         pos_idxs.append(len(samples))
                         samples.append(sample)
                         recall[i] = 1
                         #_, prop_corners_3d = utils.compute_box_3d(prop, calib.P)
-                        #pos_box.append(prop_corners_3d)
+                        pos_box.append(prop_corners_3d)
 
-        # self.visualize_proposals(pc_rect, pos_box, neg_box, gt_boxes_3d)
+        # self.visualize_proposals(pc_rect, pos_box, neg_box, gt_boxes_3d, self.pc_seg[data_idx_str])
         self.load_progress += 1
         print('load {} samples, pos {}'.format(len(samples), len(pos_idxs)))
         ret = {'samples': samples, 'pos_idxs': pos_idxs}
