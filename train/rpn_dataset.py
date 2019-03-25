@@ -209,11 +209,12 @@ class RPNDataset(object):
             '''
             # downsample
             car_idxs = random.sample(car_idxs, int(len(car_idxs) * 0.5))
+            '''
             # oversample
             cyclist_idxs = cyclist_idxs * 10
             pedestrian_idxs = pedestrian_idxs * 5
             pos_idxs = car_idxs + cyclist_idxs + pedestrian_idxs
-            '''
+
             need_neg = int(len(pos_idxs) * ((1-pos_ratio)/pos_ratio))
             keep_idxs = pos_idxs + neg_idxs[:need_neg]
             #keep_idxs = pos_idxs
@@ -360,14 +361,32 @@ class RPNDataset(object):
             return False
         # get points within proposal box
         _,prop_inds = extract_pc_in_box3d(pc_rect, prop_corners_3d)
+        pc_in_prop_box = pc_rect[prop_inds,:]
+        seg_mask = np.zeros((pc_in_prop_box.shape[0]))
+
+        # Get frustum angle
+        image_points = calib.project_rect_to_image(pc_in_prop_box[:,:3])
+        expand_image_points = np.concatenate((prop_corners_image_2d, image_points), axis=0)
+        xmin, ymin = expand_image_points.min(0)
+        xmax, ymax = expand_image_points.max(0)
+        # TODO: frustum angle is important, make use of image
+        # use gt angle for testing
+        if gt_object is not None:
+            xmin,ymin,xmax,ymax = gt_object.box2d
+
+        box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
+        uvdepth = np.zeros((1,3))
+        uvdepth[0,0:2] = box2d_center
+        uvdepth[0,2] = 20 # some random depth
+        box2d_center_rect = calib.project_image_to_rect(uvdepth)
+        frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
+            box2d_center_rect[0,0])
 
         if gt_object is not None:
             obj_type = gt_object.type
             # TODO: use dbscan instead of ground truth
             #_,gt_inds = extract_pc_in_box3d(pc_rect, gt_box_3d)
             #prop_inds = np.logical_or(prop_inds, gt_inds)
-            pc_in_prop_box = pc_rect[prop_inds,:]
-            seg_mask = np.zeros((pc_in_prop_box.shape[0]))
 
             _,inds = extract_pc_in_box3d(pc_in_prop_box, gt_box_3d)
             seg_mask[inds] = 1
@@ -380,30 +399,12 @@ class RPNDataset(object):
             heading_angle = gt_object.ry
             # Get 3D BOX size
             box3d_size = np.array([gt_object.l, gt_object.w, gt_object.h])
-            # Get frustum angle
-            image_points = calib.project_rect_to_image(pc_in_prop_box[:,:3])
-            expand_image_points = np.concatenate((prop_corners_image_2d, image_points), axis=0)
-            xmin, ymin = expand_image_points.min(0)
-            xmax, ymax = expand_image_points.max(0)
-            # TODO: frustum angle is important, make use of image
-            # xmin,ymin,xmax,ymax = gt_object.box2d
-            # xmin, ymin = prop_corners_image_2d.min(0)
-            # xmax, ymax = prop_corners_image_2d.max(0)
-            box2d_center = np.array([(xmin+xmax)/2.0, (ymin+ymax)/2.0])
-            uvdepth = np.zeros((1,3))
-            uvdepth[0,0:2] = box2d_center
-            uvdepth[0,2] = 20 # some random depth
-            box2d_center_rect = calib.project_image_to_rect(uvdepth)
-            frustum_angle = -1 * np.arctan2(box2d_center_rect[0,2],
-                box2d_center_rect[0,0])
         else:
-            pc_in_prop_box = pc_rect[prop_inds,:]
-            seg_mask = np.zeros((pc_in_prop_box.shape[0]))
             obj_type = 'NonObject'
             gt_box_3d = np.zeros((8, 3))
             heading_angle = 0
             box3d_size = np.zeros((1, 3))
-            frustum_angle = 0
+            #frustum_angle = 0
 
         #############
         rot_angle = self.get_center_view_rot_angle(frustum_angle)
@@ -706,7 +707,7 @@ if __name__ == '__main__':
         augmentX = 1
         perturb_prop = False
         fill_with_label = False
-    dataset = RPNDataset(512, kitti_path, 16, split, save_dir='./rpn_dataset_car_people/'+split,
+    dataset = RPNDataset(512, kitti_path, 16, split, save_dir='./dataset_car_people/'+split,
                  augmentX=augmentX, random_shift=False, rotate_to_center=True, random_flip=False,
                  perturb_prop=perturb_prop, fill_with_label=fill_with_label)
     dataset.preprocess()
